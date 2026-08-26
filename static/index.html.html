@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07080b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Luna Pulse V3</title>
+<style>
+:root{
+  color-scheme:dark;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",Inter,Arial,sans-serif;
+  --bg:#07080b;--panel:#111319;--panel2:#171a21;--panel3:#20242d;--border:#292e38;
+  --text:#f5f7fb;--muted:#8e96a6;--green:#35d07f;--red:#ff5d68;--yellow:#ffd166;
+  --blue:#4da3ff;--purple:#b86cff;--cyan:#67d8ff;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.hidden{display:none!important}
+
+/* LOGIN */
+.loginScreen{
+  min-height:100vh;display:grid;place-items:center;padding:24px;
+  background:
+    radial-gradient(circle at 15% 20%,rgba(184,108,255,.14),transparent 34%),
+    radial-gradient(circle at 85% 15%,rgba(77,163,255,.12),transparent 30%),
+    var(--bg)
+}
+.loginCard{
+  width:min(100%,430px);background:rgba(17,19,25,.94);border:1px solid var(--border);
+  border-radius:28px;padding:26px
+}
+.logoMark{
+  width:54px;height:54px;border-radius:18px;display:grid;place-items:center;font-weight:900;font-size:24px;
+  background:linear-gradient(145deg,#2b1e36,#181621);border:1px solid #4d335d;color:#d8adff;margin-bottom:18px
+}
+.loginCard h1{font-size:31px;letter-spacing:-.05em;margin:0}
+.loginCard h1 span{color:var(--purple)}
+.loginCard p{color:var(--muted);font-size:13px;line-height:1.55}
+.field{margin-top:14px}
+.field label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
+.field input{
+  width:100%;border-radius:14px;border:1px solid var(--border);background:#0c0e12;color:#fff;
+  padding:14px;font-size:16px;outline:none
+}
+.field input:focus{border-color:#5f4f72}
+.primary{
+  width:100%;border:0;border-radius:14px;padding:13px 15px;background:linear-gradient(135deg,#8d4cc0,#4e6be6);
+  color:#fff;font-weight:800;margin-top:16px
+}
+.loginNote{font-size:11px;color:#737b89;margin-top:12px;line-height:1.45}
+
+/* APP SHELL */
+.app{min-height:100vh}
+.topbar{
+  position:sticky;top:0;z-index:40;height:64px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;background:rgba(7,8,11,.9);backdrop-filter:blur(18px);border-bottom:1px solid #151820
+}
+.topLeft{display:flex;align-items:center;gap:10px;min-width:0}
+.menuBtn,.iconBtn{
+  width:42px;height:42px;border:1px solid var(--border);background:#12151a;color:#fff;border-radius:13px
+}
+.brandMini{font-weight:900;letter-spacing:-.04em;white-space:nowrap}
+.brandMini span{color:var(--purple)}
+.server{
+  display:flex;align-items:center;gap:6px;font-size:11px;color:#c5cad3;background:#11141a;border:1px solid var(--border);
+  border-radius:999px;padding:7px 10px;white-space:nowrap
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--yellow)}
+.dot.live{background:var(--green);box-shadow:0 0 8px rgba(53,208,127,.5)}
+.dot.err{background:var(--red)}
+
+.sidebar{
+  position:fixed;left:0;top:0;bottom:0;width:278px;z-index:60;background:#0d0f14;border-right:1px solid var(--border);
+  transform:translateX(-100%);transition:.24s ease;padding:18px 12px calc(env(safe-area-inset-bottom) + 18px);overflow:auto
+}
+.sidebar.open{transform:translateX(0)}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:55;display:none}
+.overlay.show{display:block}
+.sideBrand{padding:8px 8px 18px;font-size:22px;font-weight:900;letter-spacing:-.04em}
+.sideBrand span{color:var(--purple)}
+.navGroup{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:#697181;padding:14px 10px 6px}
+.navItem{
+  width:100%;border:0;background:transparent;color:#c7ccd6;text-align:left;padding:12px 11px;border-radius:12px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0;font-weight:700
+}
+.navItem.active{background:#1b1f27;color:#fff}
+.navItem .badge{font-size:9px;padding:3px 6px;border-radius:999px;background:#292f3a;color:#b9c0cc}
+.sideFoot{padding:15px 10px;color:#697181;font-size:10px;line-height:1.5}
+
+.content{padding:14px 12px 90px;max-width:1000px;margin:0 auto}
+.page{display:none}.page.active{display:block}
+.pageHead{margin:4px 2px 14px}
+.pageHead h2{margin:0;font-size:26px;letter-spacing:-.04em}
+.pageHead p{margin:6px 0 0;color:var(--muted);font-size:12px;line-height:1.5}
+
+.card{background:var(--panel);border:1px solid var(--border);border-radius:20px;padding:14px;margin-bottom:10px}
+.cardTitle{font-size:17px;font-weight:850;letter-spacing:-.02em}
+.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.09em}
+.small{font-size:11px;color:var(--muted);line-height:1.45}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--panel2);border-radius:16px;padding:12px}
+.stat .v{font-size:22px;font-weight:900;letter-spacing:-.04em;margin-top:5px}
+.green{color:var(--green)!important}.red{color:var(--red)!important}.yellow{color:var(--yellow)!important}.purple{color:var(--purple)!important}.cyan{color:var(--cyan)!important}
+.tag{display:inline-flex;align-items:center;border:1px solid #3a404b;border-radius:999px;padding:4px 7px;font-size:9px;font-weight:800;color:#c8ced8}
+.tag.long{color:var(--green);border-color:#285c43;background:#153125}
+.tag.short{color:var(--red);border-color:#643136;background:#351b20}
+.tag.paper{color:#d7b1ff;border-color:#573768;background:#281c31}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.btn{
+  width:100%;border:0;border-radius:13px;padding:11px 12px;background:#2a303a;color:#fff;font-weight:800
+}
+.btn.blue{background:#315d9d}.btn.green{background:#1f6848}.btn.red{background:#6b2930}.btn.purple{background:#5d3674}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+select{
+  width:100%;border-radius:13px;border:1px solid var(--border);background:#20242c;color:#fff;padding:11px 12px
+}
+.switch{position:relative;width:52px;height:31px;flex:0 0 auto}
+.switch input{display:none}
+.slider{position:absolute;inset:0;background:#3b404a;border-radius:999px}
+.slider:before{content:"";position:absolute;width:27px;height:27px;left:2px;top:2px;background:white;border-radius:50%;transition:.2s}
+.switch input:checked+.slider{background:var(--green)}
+.switch input:checked+.slider:before{transform:translateX(21px)}
+
+.radarList,.positionList,.copyList,.forexList{display:grid;gap:8px;margin-top:10px}
+.item{
+  background:var(--panel2);border-radius:16px;padding:12px;border:1px solid #252a33
+}
+.itemTop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.itemName{font-size:15px;font-weight:850}
+.itemMeta{font-size:11px;color:var(--muted);margin-top:5px}
+.score{font-size:23px;font-weight:900}
+.reason{font-size:11px;color:#b3bac5;line-height:1.45;margin-top:7px}
+.empty{text-align:center;color:var(--muted);font-size:12px;padding:22px;background:var(--panel2);border-radius:14px}
+
+.forecast{
+  margin-top:10px;padding:12px;border-radius:16px;background:linear-gradient(180deg,#171c27,#13171e);border:1px solid #2b3442
+}
+.probBar{height:8px;background:#2a2f38;border-radius:999px;overflow:hidden;margin-top:8px}
+.probFill{height:100%;background:linear-gradient(90deg,#596acb,#b86cff);width:50%}
+.predictionGrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:9px}
+.predictionGrid .stat{padding:9px}
+.predictionGrid .v{font-size:15px}
+
+.chartBox{margin-top:10px;height:150px;background:#0d1015;border-radius:14px;border:1px solid #202630;position:relative;overflow:hidden}
+.chartBox svg{width:100%;height:100%}
+.chartLabel{position:absolute;left:10px;top:8px;font-size:10px;color:#7f8998}
+
+.tradeForm{display:grid;gap:9px;margin-top:10px}
+.tradeForm .grid2{gap:8px}
+.tradeForm input{
+  width:100%;border:1px solid var(--border);background:#0e1116;color:#fff;border-radius:13px;padding:12px;font-size:16px
+}
+.tradeForm label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+
+.profile{display:flex;align-items:center;gap:12px}
+.avatar{width:50px;height:50px;border-radius:16px;background:#252b35;display:grid;place-items:center;font-weight:900;font-size:20px}
+.divider{height:1px;background:var(--border);margin:12px 0}
+
+.toast{
+  position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 16px);transform:translateX(-50%);
+  background:#1c2129;border:1px solid var(--border);padding:10px 14px;border-radius:13px;font-size:12px;z-index:90;display:none
+}
+.toast.show{display:block}
+
+@media(min-width:900px){
+  .menuBtn{display:none}
+  .sidebar{transform:none;top:0}
+  .app .topbar{margin-left:278px}
+  .content{margin-left:278px;max-width:none;padding-left:22px;padding-right:22px}
+  .overlay{display:none!important}
+}
+</style>
+</head>
+<body>
+
+<section id="loginScreen" class="loginScreen">
+  <div class="loginCard">
+    <div class="logoMark">L</div>
+    <h1>LUNA PULSE <span>V3</span></h1>
+    <p>Private paper-trading research dashboard for crypto, simulated perpetuals and the new Forex AI workspace.</p>
+    <form id="loginForm">
+      <div class="field">
+        <label for="loginName">Name</label>
+        <input id="loginName" value="Tom" autocomplete="name">
+      </div>
+      <div class="field">
+        <label for="loginPin">Access PIN</label>
+        <input id="loginPin" type="password" inputmode="numeric" maxlength="8" placeholder="Enter any PIN for UI preview">
+      </div>
+      <button class="primary" type="submit">Enter Luna Pulse</button>
+    </form>
+    <div class="loginNote">UI preview only. This screen is not secure authentication yet. Real account security must be added server-side before any live trading is considered.</div>
+  </div>
+</section>
+
+<section id="app" class="app hidden">
+  <div id="overlay" class="overlay"></div>
+
+  <aside id="sidebar" class="sidebar">
+    <div class="sideBrand">LUNA PULSE <span>V3</span></div>
+
+    <div class="navGroup">Trading</div>
+    <button class="navItem active" data-page="dashboard">Dashboard <span class="badge">LIVE</span></button>
+    <button class="navItem" data-page="auto">Auto AI Trading <span class="badge">PAPER</span></button>
+    <button class="navItem" data-page="manual">Manual Trading</button>
+    <button class="navItem" data-page="forex">Forex AI <span class="badge">NEW</span></button>
+    <button class="navItem" data-page="copy">Copy Trading <span class="badge">SIM</span></button>
+
+    <div class="navGroup">Account</div>
+    <button class="navItem" data-page="history">History</button>
+    <button class="navItem" data-page="account">Account</button>
+
+    <div class="navGroup">System</div>
+    <button id="logoutBtn" class="navItem">Log out</button>
+
+    <div class="sideFoot">V3 remains paper-only. Crypto market data is live; trade execution is simulated. Forex UI is a research module until a dedicated backend is connected.</div>
+  </aside>
+
+  <header class="topbar">
+    <div class="topLeft">
+      <button id="menuBtn" class="menuBtn" type="button">☰</button>
+      <div class="brandMini">LUNA <span>PULSE</span></div>
+    </div>
+    <div class="server"><span id="liveDot" class="dot"></span><span id="serverText">Connecting</span></div>
+  </header>
+
+  <main class="content">
+
+    <section id="dashboard" class="page active">
+      <div class="pageHead">
+        <h2>Dashboard</h2>
+        <p>Live crypto scanner, paper portfolio and Luna market intelligence.</p>
+      </div>
+      <div class="grid2">
+        <div class="stat"><div class="label">Paper Equity</div><div id="equity" class="v">—</div><div class="small">USDT</div></div>
+        <div class="stat"><div class="label">Total P/L</div><div id="pnl" class="v">—</div><div class="small">Realised + open</div></div>
+      </div>
+      <div class="card" style="margin-top:10px">
+        <div class="row">
+          <div><div class="label">Luna Market Radar</div><div class="cardTitle">Top crypto opportunities</div></div>
+          <button id="scanBtn" class="btn blue" style="width:auto;padding:9px 12px">Scan</button>
+        </div>
+        <div id="scanMeta" class="small" style="margin-top:5px">Waiting for scanner.</div>
+        <div id="radarList" class="radarList"></div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <div><div class="label">Open Portfolio</div><div class="cardTitle">Active paper positions</div></div>
+          <span id="positionBadge" class="tag">0 / 8</span>
+        </div>
+        <div id="dashboardPositions" class="positionList"></div>
+      </div>
+    </section>
+
+    <section id="auto" class="page">
+      <div class="pageHead">
+        <h2>Auto AI Trading</h2>
+        <p>Luna continuously ranks live crypto setups and can open qualifying simulated positions automatically.</p>
+      </div>
+      <div class="card">
+        <div class="row">
+          <div><div class="label">Autonomous Engine</div><div class="cardTitle">Auto paper portfolio</div></div>
+          <label class="switch"><input id="autoToggle" type="checkbox"><span class="slider"></span></label>
+        </div>
+        <div class="small" style="margin-top:8px">Only paper orders are enabled. Portfolio risk limits remain enforced by the backend.</div>
+      </div>
+      <div class="grid3">
+        <div class="stat"><div class="label">Positions</div><div id="autoPositions" class="v">0</div></div>
+        <div class="stat"><div class="label">Win rate</div><div id="autoWinRate" class="v">0%</div></div>
+        <div class="stat"><div class="label">Trades</div><div id="autoTrades" class="v">0</div></div>
+      </div>
+      <div class="card" style="margin-top:10px">
+        <div class="label">How Luna chooses trades</div>
+        <div class="reason">Momentum + volume expansion + breakout/breakdown + EMA trend + volatility + funding context. A score is a ranking signal, not a guarantee of future price movement.</div>
+      </div>
+    </section>
+
+    <section id="manual" class="page">
+      <div class="pageHead">
+        <h2>Manual Trading</h2>
+        <p>Choose one of Luna’s live crypto opportunities and open or close a paper trade yourself.</p>
+      </div>
+      <div class="card">
+        <div class="row">
+          <div><div class="label">Market</div><div class="cardTitle">Opportunity list</div></div>
+          <select id="manualFilter" style="width:135px">
+            <option value="all">All</option>
+            <option value="spot">Spot</option>
+            <option value="perp">Perps</option>
+          </select>
+        </div>
+        <div id="manualList" class="radarList"></div>
+      </div>
+    </section>
+
+    <section id="forex" class="page">
+      <div class="pageHead">
+        <h2>Forex AI</h2>
+        <p>Probability-based FX analysis workspace. V3 UI is ready; live broker execution is deliberately disabled.</p>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div><div class="label">AI Forex Scanner</div><div class="cardTitle">Chart forecast engine</div></div>
+          <span class="tag paper">RESEARCH / PAPER</span>
+        </div>
+        <div class="actions">
+          <select id="fxPair">
+            <option>EUR/USD</option>
+            <option>GBP/USD</option>
+            <option>AUD/USD</option>
+            <option>USD/JPY</option>
+            <option>USD/CAD</option>
+            <option>NZD/USD</option>
+          </select>
+          <select id="fxTf">
+            <option>5m</option>
+            <option selected>15m</option>
+            <option>1h</option>
+            <option>4h</option>
+          </select>
+        </div>
+        <button id="fxAnalyze" class="btn purple" style="margin-top:9px">Run AI Analysis</button>
+
+        <div id="forecast" class="forecast">
+          <div class="row">
+            <div>
+              <div class="label">Forecast</div>
+              <div id="forecastDirection" class="cardTitle">Awaiting analysis</div>
+            </div>
+            <div id="forecastConfidence" class="score purple">—</div>
+          </div>
+          <div class="probBar"><div id="probFill" class="probFill" style="width:0%"></div></div>
+          <div class="predictionGrid">
+            <div class="stat"><div class="label">Bias</div><div id="fxBias" class="v">—</div></div>
+            <div class="stat"><div class="label">Risk</div><div id="fxRisk" class="v">—</div></div>
+            <div class="stat"><div class="label">Horizon</div><div id="fxHorizon" class="v">—</div></div>
+          </div>
+          <div id="fxReason" class="reason">This UI reports probabilities, not certainty. Connect a verified FX data backend before treating the signals as live.</div>
+        </div>
+
+        <div class="chartBox">
+          <span class="chartLabel">Forecast path preview</span>
+          <svg viewBox="0 0 600 180" preserveAspectRatio="none" aria-label="Illustrative forex forecast path">
+            <polyline id="fxLine" points="0,108 60,104 120,112 180,96 240,101 300,89 360,91 420,76 480,81 540,68 600,72" fill="none" stroke="currentColor" stroke-width="4" class="cyan"/>
+            <line x1="300" y1="0" x2="300" y2="180" stroke="#343a46" stroke-dasharray="5 5"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="label">AI Paper Trade</div>
+        <div class="tradeForm">
+          <div class="grid2">
+            <div><label>Stop loss (pips)</label><input id="fxStop" type="number" min="1" value="20"></div>
+            <div><label>Take profit (pips)</label><input id="fxTarget" type="number" min="1" value="40"></div>
+          </div>
+          <div><label>Paper risk %</label><input id="fxRiskPct" type="number" min="0.1" max="1" step="0.1" value="0.25"></div>
+          <button id="fxPaperTrade" class="btn green">Open Forecast as Paper Trade</button>
+          <button class="btn red" disabled>Live Broker Trading Locked</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="copy" class="page">
+      <div class="pageHead">
+        <h2>Copy Trading</h2>
+        <p>Simulate copying different Luna strategies. Live third-party account mirroring is not connected in V3.</p>
+      </div>
+      <div id="copyList" class="copyList"></div>
+    </section>
+
+    <section id="history" class="page">
+      <div class="pageHead">
+        <h2>History</h2>
+        <p>Completed crypto paper trades and locally simulated Forex paper activity.</p>
+      </div>
+      <div class="card">
+        <div class="label">Crypto trade history</div>
+        <div style="overflow:auto;margin-top:8px">
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead><tr><th style="text-align:left;padding:8px 5px">Asset</th><th>Market</th><th>Side</th><th>P/L</th><th>Exit</th></tr></thead>
+            <tbody id="historyRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="label">Forex paper activity</div>
+        <div id="fxHistory" class="forexList"></div>
+      </div>
+    </section>
+
+    <section id="account" class="page">
+      <div class="pageHead">
+        <h2>Account</h2>
+        <p>Paper account status, security roadmap and system information.</p>
+      </div>
+      <div class="card">
+        <div class="profile">
+          <div class="avatar" id="avatar">T</div>
+          <div>
+            <div id="accountName" class="cardTitle">Tom</div>
+            <div class="small">Luna Pulse paper account</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="grid2">
+          <div class="stat"><div class="label">Starting balance</div><div id="startingBalance" class="v">10,000</div></div>
+          <div class="stat"><div class="label">Current equity</div><div id="accountEquity" class="v">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="label">Security status</div>
+        <div class="reason">Current login is only a front-end UI gate. Before live trading, V4 needs server-side user authentication, encrypted broker/exchange credentials, session management, audit logs, rate limiting, and withdrawal-disabled API permissions.</div>
+      </div>
+    </section>
+
+  </main>
+</section>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const state={status:null,opps:[],positions:[],trades:[],fxTrades:[],forecast:null};
+
+function $(id){return document.getElementById(id)}
+function money(n){return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+function signed(n){n=Number(n||0);return `${n>=0?"+":""}${money(n)}`}
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),2200)}
+async function api(path,opts){
+  const r=await fetch(path,opts);
+  if(!r.ok)throw new Error(await r.text());
+  return r.json();
+}
+
+function openSidebar(){$("sidebar").classList.add("open");$("overlay").classList.add("show")}
+function closeSidebar(){$("sidebar").classList.remove("open");$("overlay").classList.remove("show")}
+function showPage(id){
+  document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id===id));
+  document.querySelectorAll(".navItem[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page===id));
+  closeSidebar();window.scrollTo({top:0,behavior:"smooth"});
+}
+
+$("loginForm").addEventListener("submit",e=>{
+  e.preventDefault();
+  const name=$("loginName").value.trim()||"Trader";
+  $("accountName").textContent=name;
+  $("avatar").textContent=name.slice(0,1).toUpperCase();
+  $("loginScreen").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  refreshAll();
+});
+$("logoutBtn").addEventListener("click",()=>{
+  $("app").classList.add("hidden");
+  $("loginScreen").classList.remove("hidden");
+  closeSidebar();
+});
+$("menuBtn").addEventListener("click",openSidebar);
+$("overlay").addEventListener("click",closeSidebar);
+document.querySelectorAll(".navItem[data-page]").forEach(b=>b.addEventListener("click",()=>showPage(b.dataset.page)));
+
+async function refreshStatus(){
+  try{
+    state.status=await api("/api/status");
+    $("liveDot").className="dot "+(state.status.last_error?"err":"live");
+    $("serverText").textContent=state.status.last_error?"Server warning":"Brain online";
+    const a=state.status.account||{};
+    $("equity").textContent=money(a.equity);
+    $("accountEquity").textContent=money(a.equity);
+    $("startingBalance").textContent=money(a.starting_balance||10000);
+    const pnl=Number(a.total_pnl||0);
+    $("pnl").textContent=signed(pnl);$("pnl").className="v "+(pnl>=0?"green":"red");
+    $("autoToggle").checked=!!state.status.auto_enabled;
+    $("autoPositions").textContent=(state.status.positions||[]).length;
+    $("autoWinRate").textContent=money(state.status.win_rate||0)+"%";
+    $("autoTrades").textContent=state.status.trade_count||0;
+    $("positionBadge").textContent=`${(state.status.positions||[]).length} / ${state.status.max_positions||8}`;
+  }catch{
+    $("liveDot").className="dot err";$("serverText").textContent="Offline";
+  }
+}
+async function refreshOpps(){
+  try{
+    const x=await api("/api/opportunities?limit=50");
+    state.opps=x.items||[];
+    $("scanMeta").textContent=x.last_scan?`Last scan ${new Date(x.last_scan).toLocaleTimeString()} · ${state.opps.length} markets ranked`:"No scan yet";
+    renderRadar();renderManual();
+  }catch{$("radarList").innerHTML='<div class="empty">Could not load radar.</div>'}
+}
+function radarCard(x,manual=false){
+  const side=x.side==="SHORT"?"short":"long";
+  return `<div class="item">
+    <div class="itemTop">
+      <div>
+        <div class="itemName">${esc(x.asset)} <span class="tag">${esc((x.market||"").toUpperCase())}</span> <span class="tag ${side}">${esc(x.side)}</span></div>
+        <div class="itemMeta">${Number(x.price||0).toPrecision(6)} · 24h ${Number(x.change_24h||0).toFixed(2)}% · vol ${Number(x.vol_ratio||0).toFixed(1)}×</div>
+      </div>
+      <div class="score ${Number(x.score)>=7.5?"green":Number(x.score)>=5?"yellow":""}">${Number(x.score||0).toFixed(1)}</div>
+    </div>
+    <div class="reason">${esc((x.reasons||[]).slice(0,3).join(" · ")||"No strong factors")}</div>
+    ${manual?`<button class="btn blue manualOpen" data-market="${esc(x.market)}" data-symbol="${esc(x.symbol)}" style="margin-top:9px">Open Paper Trade</button>`:""}
+  </div>`;
+}
+function renderRadar(){
+  const top=state.opps.slice(0,8);
+  $("radarList").innerHTML=top.length?top.map(x=>radarCard(x)).join(""):'<div class="empty">No markets loaded yet.</div>';
+}
+function renderManual(){
+  const filter=$("manualFilter").value;
+  const rows=state.opps.filter(x=>filter==="all"||x.market===filter).slice(0,20);
+  $("manualList").innerHTML=rows.length?rows.map(x=>radarCard(x,true)).join(""):'<div class="empty">No matching opportunities.</div>';
+  document.querySelectorAll(".manualOpen").forEach(b=>b.addEventListener("click",()=>paperOpen(b.dataset.market,b.dataset.symbol)));
+}
+$("manualFilter").addEventListener("change",renderManual);
+
+async function refreshPositions(){
+  try{
+    const x=await api("/api/positions");
+    state.positions=x.items||[];
+    $("dashboardPositions").innerHTML=state.positions.length?state.positions.slice(0,6).map(p=>{
+      const pnl=Number(p.unrealized||0);
+      return `<div class="item"><div class="itemTop"><div><div class="itemName">${esc(p.asset)} · ${esc((p.market||"").toUpperCase())} · <span class="${p.side==="LONG"?"green":"red"}">${esc(p.side)}</span></div><div class="itemMeta">Entry ${Number(p.entry||0).toPrecision(6)} · Now ${Number(p.current_price||0).toPrecision(6)}</div></div><div class="${pnl>=0?"green":"red"}" style="font-weight:850">${signed(pnl)}</div></div></div>`;
+    }).join(""):'<div class="empty">No open paper positions.</div>';
+  }catch{$("dashboardPositions").innerHTML='<div class="empty">Could not load positions.</div>'}
+}
+async function refreshTrades(){
+  try{
+    const x=await api("/api/trades?limit=50");
+    state.trades=x.items||[];
+    $("historyRows").innerHTML=state.trades.map(t=>`<tr>
+      <td style="text-align:left;padding:8px 5px;border-bottom:1px solid #252a33">${esc(t.asset)}</td>
+      <td style="text-align:right;padding:8px 5px;border-bottom:1px solid #252a33">${esc(t.market)}</td>
+      <td style="text-align:right;padding:8px 5px;border-bottom:1px solid #252a33" class="${t.side==="LONG"?"green":"red"}">${esc(t.side)}</td>
+      <td style="text-align:right;padding:8px 5px;border-bottom:1px solid #252a33" class="${Number(t.pnl)>=0?"green":"red"}">${signed(t.pnl)}</td>
+      <td style="text-align:right;padding:8px 5px;border-bottom:1px solid #252a33">${esc(t.reason||"")}</td>
+    </tr>`).join("");
+  }catch{}
+}
+async function refreshAll(){await Promise.all([refreshStatus(),refreshOpps(),refreshPositions(),refreshTrades()])}
+
+$("scanBtn").addEventListener("click",async()=>{
+  $("scanBtn").disabled=true;$("scanBtn").textContent="Scanning…";
+  try{await api("/api/scan",{method:"POST"});await refreshAll();toast("Market scan complete")}
+  catch(e){toast("Scan failed")}
+  finally{$("scanBtn").disabled=false;$("scanBtn").textContent="Scan"}
+});
+$("autoToggle").addEventListener("change",async e=>{
+  try{
+    await api("/api/auto",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:e.target.checked})});
+    toast(e.target.checked?"Auto paper engine enabled":"Auto paper engine paused");
+  }catch{e.target.checked=!e.target.checked;toast("Could not change auto engine")}
+});
+async function paperOpen(market,symbol){
+  try{
+    await api("/api/paper/open",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({market,symbol})});
+    await refreshAll();toast("Paper position opened");
+  }catch{toast("Trade rejected by Luna risk rules")}
+}
+
+/* FOREX UI MOCK / PAPER RESEARCH */
+const fxProfiles={
+  "EUR/USD":{base:63,bias:"LONG",risk:"Medium"},
+  "GBP/USD":{base:56,bias:"LONG",risk:"High"},
+  "AUD/USD":{base:59,bias:"LONG",risk:"Medium"},
+  "USD/JPY":{base:61,bias:"SHORT",risk:"Medium"},
+  "USD/CAD":{base:54,bias:"SHORT",risk:"Low"},
+  "NZD/USD":{base:57,bias:"LONG",risk:"High"}
+};
+$("fxAnalyze").addEventListener("click",()=>{
+  const pair=$("fxPair").value,tf=$("fxTf").value,p=fxProfiles[pair];
+  const confidence=Math.max(51,Math.min(78,p.base+(Math.random()*8-4)));
+  state.forecast={pair,tf,direction:p.bias,confidence,risk:p.risk};
+  $("forecastDirection").textContent=`${p.bias} bias · ${pair}`;
+  $("forecastConfidence").textContent=confidence.toFixed(0)+"%";
+  $("probFill").style.width=confidence+"%";
+  $("fxBias").textContent=p.bias;
+  $("fxRisk").textContent=p.risk;
+  $("fxHorizon").textContent=tf;
+  $("fxReason").textContent=`Prototype forecast UI: ${confidence.toFixed(0)}% ${p.bias} probability over the selected ${tf} horizon. This is illustrative until a live FX data/model backend is connected.`;
+  $("fxLine").setAttribute("points",p.bias==="LONG"
+    ?"0,110 60,106 120,112 180,100 240,104 300,92 360,87 420,78 480,82 540,67 600,60"
+    :"0,70 60,73 120,68 180,81 240,77 300,88 360,94 420,101 480,97 540,111 600,118");
+});
+$("fxPaperTrade").addEventListener("click",()=>{
+  if(!state.forecast){toast("Run AI Analysis first");return}
+  const risk=Math.max(.1,Math.min(1,Number($("fxRiskPct").value)||.25));
+  const stop=Math.max(1,Number($("fxStop").value)||20),target=Math.max(1,Number($("fxTarget").value)||40);
+  state.fxTrades.unshift({...state.forecast,risk,stop,target,time:new Date().toLocaleTimeString(),status:"OPEN"});
+  renderFxHistory();toast("Forex paper trade created");showPage("history");
+});
+function renderFxHistory(){
+  $("fxHistory").innerHTML=state.fxTrades.length?state.fxTrades.map(t=>`<div class="item">
+    <div class="itemTop"><div><div class="itemName">${esc(t.pair)} · <span class="${t.direction==="LONG"?"green":"red"}">${esc(t.direction)}</span></div><div class="itemMeta">${esc(t.time)} · ${esc(t.tf)} · risk ${t.risk}%</div></div><span class="tag paper">${esc(t.status)}</span></div>
+    <div class="reason">Forecast ${Number(t.confidence).toFixed(0)}% · stop ${t.stop} pips · target ${t.target} pips</div>
+  </div>`).join(""):'<div class="empty">No Forex paper trades yet.</div>';
+}
+renderFxHistory();
+
+/* COPY TRADING SIMULATION */
+const strategies=[
+  {name:"Luna Momentum",desc:"Crypto momentum + breakout setups",risk:"Medium",status:"Available"},
+  {name:"Luna Perp Trend",desc:"Simulated long/short perpetual trend strategy",risk:"High",status:"Available"},
+  {name:"Luna Forex Swing",desc:"Prototype FX probability strategy",risk:"Medium",status:"Research"}
+];
+$("copyList").innerHTML=strategies.map((s,i)=>`<div class="item">
+  <div class="itemTop"><div><div class="itemName">${esc(s.name)}</div><div class="itemMeta">${esc(s.desc)}</div></div><span class="tag ${s.status==="Research"?"paper":""}">${esc(s.status)}</span></div>
+  <div class="reason">Risk profile: ${esc(s.risk)}. Copying is simulated only in V3.</div>
+  <button class="btn ${s.status==="Research"?"purple":"blue"} copyBtn" data-i="${i}" style="margin-top:9px">${s.status==="Research"?"Preview Strategy":"Start Simulated Copy"}</button>
+</div>`).join("");
+document.querySelectorAll(".copyBtn").forEach(b=>b.addEventListener("click",()=>toast("Simulated copy strategy selected")));
+
+if("serviceWorker" in navigator){navigator.serviceWorker.register("/sw.js").catch(()=>{})}
+</script>
+</body>
+</html>
