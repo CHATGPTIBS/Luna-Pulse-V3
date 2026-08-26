@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#09090b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Luna Pulse">
+<link rel="manifest" href="/manifest.json">
+<title>Luna Pulse V3</title>
+<style>
+:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,Arial,sans-serif;
+--bg:#09090b;--card:#17171a;--card2:#212126;--border:#303038;--muted:#94949d;--green:#30d158;--red:#ff453a;--yellow:#ffd60a;--blue:#0a84ff;--purple:#bf5af2}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#f7f7f8;padding:calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 30px)}
+.wrap{max-width:900px;margin:auto}h1{font-size:30px;margin:8px 0 4px;letter-spacing:-.04em}.v{color:var(--purple)}
+.sub{font-size:13px;color:var(--muted);line-height:1.45}.top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:14px;margin-bottom:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}.big{font-size:25px;font-weight:800;letter-spacing:-.03em;margin-top:5px}
+.small{font-size:12px;color:var(--muted);line-height:1.45}.pill{display:inline-flex;border:1px solid var(--border);background:#232328;border-radius:999px;padding:5px 8px;font-size:11px;color:#c8c8cf}
+.green{color:var(--green)}.red{color:var(--red)}.yellow{color:var(--yellow)}.purple{color:var(--purple)}
+button,select{font:inherit;color:white;border-radius:13px;border:1px solid var(--border);background:#28282e;padding:10px 11px}
+button{background:var(--blue);border:none;font-weight:750}button.secondary{background:#303036}button.danger{background:#5c2222}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}.controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.list{display:grid;gap:8px;margin-top:9px}.opp{background:#202024;border-radius:15px;padding:11px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.score{font-size:20px;font-weight:850;text-align:right}.tag{display:inline-flex;font-size:10px;font-weight:800;border:1px solid var(--border);border-radius:999px;padding:4px 6px;margin-right:4px}
+.opp button{width:auto;font-size:12px;padding:7px 9px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}.metric{background:var(--card2);border-radius:13px;padding:9px}
+.metric b{display:block;margin-top:4px}.position{background:#202024;border-radius:15px;padding:11px;margin-top:8px}.phead{display:flex;justify-content:space-between;gap:10px}
+.bar{height:8px;border-radius:99px;background:#2d2d33;overflow:hidden;margin-top:7px}.fill{height:100%;background:linear-gradient(90deg,var(--green),var(--yellow));}
+table{width:100%;border-collapse:collapse;font-size:11px}th,td{padding:7px 4px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}
+.scroll{overflow:auto}.switch{position:relative;width:52px;height:31px;flex:0 0 auto}.switch input{display:none}.slider{position:absolute;inset:0;border-radius:99px;background:#3c3c42}
+.slider:before{content:"";position:absolute;width:27px;height:27px;left:2px;top:2px;background:white;border-radius:50%;transition:.2s}.switch input:checked+.slider{background:var(--green)}.switch input:checked+.slider:before{transform:translateX(21px)}
+@media(max-width:480px){.grid3{grid-template-columns:1fr 1fr}.big{font-size:22px}}
+</style>
+</head>
+<body><div class="wrap">
+<div class="top"><div><h1>LUNA PULSE <span class="v">V3</span></h1><div class="sub">24/7 server brain · dynamic spot + perpetual scanner · multi-position paper portfolio</div></div><span class="pill" id="server">Connecting</span></div>
+
+<div class="grid2">
+<div class="card"><div class="label">Paper Equity</div><div class="big" id="equity">—</div><div class="small">USDT</div></div>
+<div class="card"><div class="label">Total P/L</div><div class="big" id="pnl">—</div><div class="small">Realised + open</div></div>
+</div>
+
+<div class="card">
+<div class="row"><div><div class="label">Auto Paper Engine</div><div style="font-weight:800;font-size:18px;margin-top:3px">Autonomous portfolio mode</div></div>
+<label class="switch"><input id="auto" type="checkbox"><span class="slider"></span></label></div>
+<div class="small" style="margin-top:8px">V3 can hold several paper positions at once. A separate portfolio risk cap can reject new entries even when Luna likes the setup.</div>
+<div class="controls"><button onclick="scanNow()">Scan Now</button><button class="secondary" onclick="refreshAll()">Refresh Dashboard</button></div>
+</div>
+
+<div class="card">
+<div class="row"><div><div class="label">Market Radar</div><div style="font-size:19px;font-weight:800;margin-top:3px">Trending opportunities</div></div>
+<select id="marketFilter" onchange="renderOpps()"><option value="all">All</option><option value="spot">Spot</option><option value="perp">Perps</option></select></div>
+<div class="small" id="scanMeta" style="margin-top:5px">Waiting for first server scan.</div>
+<div class="list" id="opps"></div>
+</div>
+
+<div class="card">
+<div class="row"><div><div class="label">Open Positions</div><div style="font-size:19px;font-weight:800;margin-top:3px">Portfolio</div></div><span class="pill" id="positionCount">0 / 8</span></div>
+<div class="list" id="positions"></div>
+</div>
+
+<div class="card">
+<div class="label">Performance</div>
+<div class="metrics">
+<div class="metric"><div class="label">Win Rate</div><b id="winRate">0%</b></div>
+<div class="metric"><div class="label">Trades</div><b id="tradeCount">0</b></div>
+<div class="metric"><div class="label">Risk Cap</div><b id="riskCap">3.0%</b></div>
+</div>
+</div>
+
+<div class="card"><div class="label">Recent Trades</div><div class="scroll" style="margin-top:8px"><table><thead><tr><th>Market</th><th>Coin</th><th>Side</th><th>P/L</th><th>Exit</th></tr></thead><tbody id="trades"></tbody></table></div>
+<div class="controls"><button class="secondary" onclick="resetPaper()">Reset Paper Account</button><button class="danger" disabled>Real Trading Locked</button></div>
+</div>
+
+<div class="small" style="padding:4px 3px 25px">Luna Pulse V3 is paper-only. Perpetuals are simulated at 1× leverage by default. No API-key fields, withdrawal permissions or live order routes exist in this build.</div>
+</div>
+<script>
+let OPPS=[],STATUS=null;
+
+function f(n,d=2){return Number(n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d})}
+function px(n){n=Number(n);if(n>=1000)return f(n,2);if(n>=1)return f(n,4);if(n>=.01)return n.toFixed(6);return n.toPrecision(6)}
+function signed(n){n=Number(n);return `${n>=0?"+":""}${f(n,2)}`}
+async function api(path,opts){const r=await fetch(path,opts);if(!r.ok){let t=await r.text();throw new Error(t)}return r.json()}
+
+async function refreshStatus(){
+  try{
+    STATUS=await api("/api/status");
+    document.getElementById("server").textContent=STATUS.last_error?"Server warning":"24/7 Brain Online";
+    document.getElementById("server").className="pill "+(STATUS.last_error?"yellow":"green");
+    document.getElementById("equity").textContent=f(STATUS.account.equity);
+    const p=STATUS.account.total_pnl,el=document.getElementById("pnl");el.textContent=signed(p);el.className="big "+(p>=0?"green":"red");
+    document.getElementById("auto").checked=STATUS.auto_enabled;
+    document.getElementById("winRate").textContent=f(STATUS.win_rate,1)+"%";
+    document.getElementById("tradeCount").textContent=STATUS.trade_count;
+    document.getElementById("riskCap").textContent=f(STATUS.max_total_risk_pct*100,1)+"%";
+    document.getElementById("positionCount").textContent=`${STATUS.positions.length} / ${STATUS.max_positions}`;
+  }catch(e){document.getElementById("server").textContent="Server offline";document.getElementById("server").className="pill red"}
+}
+async function refreshOpps(){
+  const x=await api("/api/opportunities?limit=60");OPPS=x.items||[];
+  document.getElementById("scanMeta").textContent=x.last_scan?`Last scan: ${new Date(x.last_scan).toLocaleString()} · ${OPPS.length} ranked markets`:"Waiting for first server scan.";
+  renderOpps();
+}
+function renderOpps(){
+  const filter=document.getElementById("marketFilter").value;
+  const rows=OPPS.filter(x=>filter==="all"||x.market===filter).slice(0,20);
+  document.getElementById("opps").innerHTML=rows.length?rows.map(x=>{
+    const cls=x.score>=8?"green":x.score>=6?"yellow":"";
+    const meme=x.is_meme?'<span class="tag purple">MEME</span>':"";
+    const perp=x.market==="perp"?'<span class="tag">PERP</span>':'<span class="tag">SPOT</span>';
+    const side=`<span class="tag ${x.side==="LONG"?"green":"red"}">${x.side}</span>`;
+    return `<div class="opp"><div><div style="font-weight:850">${x.asset} ${perp}${meme}${side}</div>
+      <div class="small">${px(x.price)} · 24h ${x.change_24h>=0?"+":""}${f(x.change_24h,2)}% · vol ${f(x.vol_ratio,1)}×</div>
+      <div class="small">${(x.reasons||[]).slice(0,3).join(" · ")||"No strong factors"}</div>
+      <button onclick="paperOpen('${x.market}','${x.symbol}')">Paper Open</button></div>
+      <div class="score ${cls}">${f(x.score,1)}<div class="small">/10</div></div></div>`
+  }).join(""):'<div class="small">No markets loaded yet.</div>';
+}
+async function refreshPositions(){
+  const x=await api("/api/positions");const rows=x.items||[];
+  document.getElementById("positions").innerHTML=rows.length?rows.map(p=>{
+    const pnl=Number(p.unrealized);
+    return `<div class="position"><div class="phead"><div><b>${p.asset} · ${p.market.toUpperCase()} · <span class="${p.side==="LONG"?"green":"red"}">${p.side}</span></b>
+      <div class="small">Entry ${px(p.entry)} · Now ${px(p.current_price)} · Stop ${px(p.stop)} · Target ${px(p.target)}</div></div>
+      <b class="${pnl>=0?"green":"red"}">${signed(pnl)}</b></div>
+      <button class="secondary" style="margin-top:8px" onclick="paperClose(${p.id})">Close Paper Position</button></div>`
+  }).join(""):'<div class="small">No open paper positions.</div>';
+}
+async function refreshTrades(){
+  const x=await api("/api/trades?limit=30");const rows=x.items||[];
+  document.getElementById("trades").innerHTML=rows.map(t=>`<tr><td>${t.market}</td><td>${t.asset}</td><td class="${t.side==="LONG"?"green":"red"}">${t.side}</td><td class="${t.pnl>=0?"green":"red"}">${signed(t.pnl)}</td><td>${t.reason||""}</td></tr>`).join("");
+}
+async function refreshAll(){await Promise.all([refreshStatus(),refreshOpps(),refreshPositions(),refreshTrades()])}
+async function scanNow(){try{document.getElementById("scanMeta").textContent="Scanning market…";await api("/api/scan",{method:"POST"});await refreshAll()}catch(e){alert("Scan failed: "+e.message)}}
+async function paperOpen(market,symbol){try{await api("/api/paper/open",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({market,symbol})});await refreshAll()}catch(e){alert("Luna rejected that paper trade: "+e.message)}}
+async function paperClose(id){try{await api(`/api/paper/close/${id}`,{method:"POST"});await refreshAll()}catch(e){alert("Could not close: "+e.message)}}
+async function resetPaper(){if(!confirm("Reset the V3 paper account and erase all paper trades?"))return;await api("/api/reset",{method:"POST"});await refreshAll()}
+document.getElementById("auto").addEventListener("change",async e=>{await api("/api/auto",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:e.target.checked})});await refreshStatus()});
+refreshAll();setInterval(refreshAll,30000);
+if("serviceWorker"in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
+</script></body></html>
