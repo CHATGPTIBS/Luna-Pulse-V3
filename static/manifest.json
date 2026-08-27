@@ -1,9 +1,0 @@
-{
-  "name": "Luna Pulse V3",
-  "short_name": "Luna Pulse",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#09090b",
-  "description": "24/7 crypto scanner and paper-trading portfolio dashboard."
-}
