@@ -1,0 +1,21 @@
+LUNA PULSE V3.3 — RENDER ENVIRONMENT
+
+Add these BEFORE deploying the V3.3 code:
+
+LUNA_ADMIN_USERNAME=<choose your owner username>
+LUNA_ADMIN_PASSWORD=<choose a strong password, minimum 10 characters>
+LUNA_ADMIN_DISPLAY_NAME=<your display name>
+
+For Forex AI:
+TWELVE_DATA_API_KEY=<your Twelve Data API key>
+
+Keep:
+LUNA_COOKIE_SECURE=1
+
+Optional:
+LUNA_SESSION_HOURS=168
+LUNA_FOREX_AUTO_CONFIDENCE=68
+LUNA_FOREX_SCAN_SECONDS=900
+
+There is NO public signup.
+Only the admin account can create additional users from the profile panel.

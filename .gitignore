@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.venv/
+luna_v3.sqlite3
