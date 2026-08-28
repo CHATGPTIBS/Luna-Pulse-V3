@@ -1,0 +1,9 @@
+{
+  "name": "Luna Pulse V3.3",
+  "short_name": "Luna Pulse",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08090d",
+  "theme_color": "#08090d",
+  "description": "Private crypto and Forex AI paper-trading research dashboard."
+}
