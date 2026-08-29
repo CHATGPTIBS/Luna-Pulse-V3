@@ -1,0 +1,29 @@
+LUNA MEME BOT V1 — SAME RENDER SERVICE
+
+1. Keep your existing Render Web Service. You do NOT need another CPU/service.
+2. Upload/replace the files in this package in the SAME GitHub repo.
+3. Commit to main.
+4. Render should redeploy automatically.
+5. Log in to Luna Pulse.
+6. Open:
+   https://YOUR-RENDER-URL/api/meme/status
+   You should see provider "DexScreener", chain "Solana", and real_money_enabled false.
+7. Trigger one scan using POST /api/meme/scan from the UI/API.
+8. Enable auto paper mode with POST /api/meme/auto {"enabled":true}.
+
+No new API key is needed for the meme bot.
+
+Optional Render environment variables:
+LUNA_MEME_SCAN_SECONDS=60
+LUNA_MEME_CANDIDATES=60
+LUNA_MEME_MAX_POSITIONS=4
+LUNA_MEME_RISK_PCT=0.002
+LUNA_MEME_MAX_TOTAL_RISK_PCT=0.01
+LUNA_MEME_ENTRY_SCORE=7.8
+LUNA_MEME_MIN_LIQUIDITY=150000
+LUNA_MEME_MIN_H1_VOLUME=50000
+LUNA_MEME_MIN_M5_VOLUME=5000
+LUNA_MEME_MIN_AGE_MINUTES=20
+LUNA_MEME_COOLDOWN_MINUTES=60
+
+Leave defaults alone for the first paper test.
