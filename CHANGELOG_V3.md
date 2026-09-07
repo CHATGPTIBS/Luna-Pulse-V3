@@ -3,12 +3,15 @@
 ## Monitoring / API reliability
 
 - Replaced all-wallet fixed-interval polling with an adaptive per-wallet scheduler.
-- Added separate hot and idle polling intervals.
+- Added separate hot and idle polling intervals plus a hot-wallet hold period after detected activity.
+- Added lightweight Solana latest-signature preflight checks before Helius enhanced-transaction requests.
+- Idle wallets with unchanged signatures no longer require repeated Helius enhanced-transaction calls.
+- Newly added wallets are seeded from the signature preflight instead of consuming a Helius enhanced request.
 - Added a central Helius request queue and minimum request spacing.
 - Added short-lived Helius response caching.
 - Added HTTP 429 handling with retry/backoff and cooldown state.
 - Added special handling for `max usage reached` so quota exhaustion does not cause retry storms.
-- Added Helius request, cache-hit, 429, failure and cooldown telemetry.
+- Added Helius request, cache-hit, 429, quota, failure and cooldown telemetry.
 
 ## Smart-money signal engine
 
@@ -19,6 +22,7 @@
 - Added configurable consensus time window.
 - Added minimum leader buy size.
 - Added per-token duplicate signal cooldown.
+- Separated signal-alert cooldown from paper-execution cooldown, preventing TRACK-only consensus from blocking a later PAPER source.
 - Added persistent signal history.
 - Qualified paper buys select the highest-weight participating PAPER wallet as the source trader.
 
@@ -37,6 +41,7 @@
 - Added tier/weight controls to `/copy add`.
 - Added `maxdaily` and `skippedalerts` to `/risk`.
 - Upgraded `/dashboard`, `/status`, `/help`, wallet lists and alert embeds for V3.
+- `/health` now exposes Helius quota exhaustion and signature-preflight status.
 
 ## State / compatibility
 
@@ -48,4 +53,4 @@
 
 - Version bumped to `0.3.0`.
 - Existing Render Node 20 worker remains compatible.
-- Updated `.env.example` with V3 adaptive polling and Helius protection settings.
+- Updated `.env.example` with V3 adaptive polling, signature preflight and Helius protection settings.
