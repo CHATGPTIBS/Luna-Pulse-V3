@@ -5,13 +5,18 @@ const DATA_DIR = path.resolve(process.cwd(), 'data');
 const FILE = path.join(DATA_DIR, 'state.json');
 
 const defaults = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   leaders: [],
   priceAlerts: [],
   nextPriceAlertId: 1,
   nextTradeId: 1,
+  nextOrderId: 1,
+  nextSniperId: 1,
   tradeHistory: [],
   signalHistory: [],
+  orders: [],
+  snipers: [],
+  watchlist: [],
   blockedMints: [],
   paper: { startingSol: 10, cashSol: 10, realizedPnlSol: 0, positions: [] },
   settings: {
@@ -24,6 +29,7 @@ const defaults = {
 
     copyBuySol: 0.03,
     maxTradeSol: 0.10,
+    maxManualTradeSol: 1.0,
     maxDailyBuySol: 0.30,
     minLiquidityUsd: 25000,
     maxMarketCapUsd: 0,
@@ -33,8 +39,6 @@ const defaults = {
     skipExistingPosition: true,
     sellMode: 'proportional',
 
-    // V3 signal engine. Defaults preserve one-wallet copy behaviour while
-    // allowing consensus mode to be enabled from Discord.
     minLeaderBuySol: 0.02,
     signalMinWallets: 1,
     signalMinWeight: 1,
@@ -45,12 +49,7 @@ const defaults = {
 };
 
 function clone(v) { return JSON.parse(JSON.stringify(v)); }
-
-function tierWeight(tier) {
-  if (tier === 'A') return 1.5;
-  if (tier === 'C') return 0.75;
-  return 1;
-}
+function tierWeight(tier) { return tier === 'A' ? 1.5 : tier === 'C' ? 0.75 : 1; }
 
 function normalizeLeader(l = {}) {
   const tier = ['A', 'B', 'C'].includes(l.tier) ? l.tier : 'B';
@@ -60,6 +59,16 @@ function normalizeLeader(l = {}) {
     enabled: l.enabled !== false,
     copyMode: ['paper', 'track'].includes(l.copyMode) ? l.copyMode : 'paper',
     copyBuySol: l.copyBuySol ?? null,
+    copyBuyPct: Number.isFinite(Number(l.copyBuyPct)) ? Number(l.copyBuyPct) : 0,
+    copySells: l.copySells !== false,
+    duplicateBuys: l.duplicateBuys === true,
+    minLeaderBuySol: l.minLeaderBuySol == null ? null : Number(l.minLeaderBuySol),
+    minLiquidityUsd: l.minLiquidityUsd == null ? null : Number(l.minLiquidityUsd),
+    minMarketCapUsd: l.minMarketCapUsd == null ? null : Number(l.minMarketCapUsd),
+    maxMarketCapUsd: l.maxMarketCapUsd == null ? null : Number(l.maxMarketCapUsd),
+    autoTakeProfitPct: Number(l.autoTakeProfitPct || 0),
+    autoStopLossPct: Number(l.autoStopLossPct || 0),
+    trailingStopPct: Number(l.trailingStopPct || 0),
     tier,
     weight: Number.isFinite(parsedWeight) && parsedWeight > 0 ? parsedWeight : tierWeight(tier),
     lastSignature: l.lastSignature || null,
@@ -67,6 +76,29 @@ function normalizeLeader(l = {}) {
     lastActivityAt: Number(l.lastActivityAt || 0),
     nextPollAt: Number(l.nextPollAt || 0),
     pollErrors: Number(l.pollErrors || 0),
+  };
+}
+
+function normalizeOrder(o = {}) {
+  return {
+    ...o,
+    id: Number(o.id || 0),
+    status: ['open', 'filled', 'cancelled', 'failed'].includes(o.status) ? o.status : 'open',
+    mode: o.mode === 'live' ? 'live' : 'paper',
+    executions: Number(o.executions || 0),
+    failures: Number(o.failures || 0),
+  };
+}
+
+function normalizeSniper(s = {}) {
+  return {
+    ...s,
+    id: Number(s.id || 0),
+    mode: s.mode === 'live' ? 'live' : 'paper',
+    enabled: s.enabled !== false,
+    completed: Number(s.completed || 0),
+    maxSnipes: Math.max(1, Number(s.maxSnipes || 1)),
+    seenMints: Array.isArray(s.seenMints) ? s.seenMints.slice(0, 150) : [],
   };
 }
 
@@ -80,18 +112,26 @@ export class StateStore {
     if (!fs.existsSync(FILE)) return clone(defaults);
     try {
       const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      return {
+      const data = {
         ...clone(defaults),
         ...parsed,
-        schemaVersion: 3,
+        schemaVersion: 4,
         leaders: (parsed.leaders || []).map(normalizeLeader),
         settings: { ...defaults.settings, ...(parsed.settings || {}) },
         daily: { ...defaults.daily, ...(parsed.daily || {}) },
         paper: { ...defaults.paper, ...(parsed.paper || {}), positions: parsed.paper?.positions || [] },
         tradeHistory: parsed.tradeHistory || [],
         signalHistory: parsed.signalHistory || [],
+        orders: (parsed.orders || []).map(normalizeOrder),
+        snipers: (parsed.snipers || []).map(normalizeSniper),
+        watchlist: Array.isArray(parsed.watchlist) ? parsed.watchlist : [],
         blockedMints: parsed.blockedMints || [],
       };
+      const maxOrder = Math.max(0, ...data.orders.map(o => Number(o.id || 0)));
+      const maxSniper = Math.max(0, ...data.snipers.map(s => Number(s.id || 0)));
+      data.nextOrderId = Math.max(Number(data.nextOrderId || 1), maxOrder + 1);
+      data.nextSniperId = Math.max(Number(data.nextSniperId || 1), maxSniper + 1);
+      return data;
     } catch {
       return clone(defaults);
     }
