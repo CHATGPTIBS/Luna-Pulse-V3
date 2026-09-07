@@ -1,13 +1,13 @@
 {
   "name": "solana-copy-discord-bot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "node src/index.js",
     "deploy-commands": "node src/deploy-commands.js",
-    "check": "node --check src/index.js && node --check src/commands.js && node --check src/monitor.js && node --check src/analytics.js && node --check src/paper.js && node --check src/jupiter.js && node --check src/solana.js && node --check src/state.js && node --check src/swap.js"
+    "check": "node --check src/index.js && node --check src/commands.js && node --check src/monitor.js && node --check src/analytics.js && node --check src/paper.js && node --check src/jupiter.js && node --check src/helius.js && node --check src/solana.js && node --check src/state.js && node --check src/swap.js && node -e \"import('./src/commands.js').then(m => { if (!Array.isArray(m.commands) || !m.commands.length) process.exit(1); console.log('Validated', m.commands.length, 'Discord commands'); })\""
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
