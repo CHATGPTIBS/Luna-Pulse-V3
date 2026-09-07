@@ -5,6 +5,7 @@ import { getLatestSignature, getTokenBalanceRaw } from './solana.js';
 import { config } from './config.js';
 import { parseSwap, short, fmt } from './swap.js';
 import { paperBuy, paperSell } from './paper.js';
+import { createAutoSellSet } from './strategy.js';
 
 const signalBook = new Map();
 const tokenCache = new Map();
@@ -13,6 +14,7 @@ function explorerTx(sig) { return `https://solscan.io/tx/${sig}`; }
 function leaderMode(leader) { return leader.copyMode === 'track' ? 'track' : leader.copyMode === 'paper' ? 'paper' : 'legacy-live'; }
 function tierWeight(tier) { return tier === 'A' ? 1.5 : tier === 'C' ? 0.75 : 1; }
 function weightOf(leader) { const n = Number(leader.weight); return Number.isFinite(n) && n > 0 ? n : tierWeight(leader.tier); }
+function leaderMinBuy(leader, settings) { return leader.minLeaderBuySol == null ? Number(settings.minLeaderBuySol || 0) : Number(leader.minLeaderBuySol || 0); }
 
 async function alertChannel(client, store) {
   const id = store.data.settings.alertChannelId;
@@ -23,7 +25,6 @@ async function alertChannel(client, store) {
 async function tokenSnapshot(mint) {
   const cached = tokenCache.get(mint);
   if (cached && Date.now() - cached.at < 30000) return cached.value;
-
   let info = null;
   let price = null;
   try {
@@ -31,7 +32,6 @@ async function tokenSnapshot(mint) {
     info = i;
     price = p?.[mint] || null;
   } catch {}
-
   const value = {
     info,
     price,
@@ -47,11 +47,8 @@ function pruneSignals(store) {
   const windowMs = Math.max(30, Number(store.data.settings.signalWindowSec || 120)) * 1000;
   const cooldownMs = Math.max(0, Number(store.data.settings.signalCooldownSec || 0)) * 1000;
   const participantCutoff = now - windowMs;
-
   for (const [mint, book] of signalBook) {
-    for (const [address, row] of book.buyers) {
-      if (row.at < participantCutoff) book.buyers.delete(address);
-    }
+    for (const [address, row] of book.buyers) if (row.at < participantCutoff) book.buyers.delete(address);
     const signalCooldownExpired = !book.firedAt || now - book.firedAt >= cooldownMs;
     const paperCooldownExpired = !book.paperFiredAt || now - book.paperFiredAt >= cooldownMs;
     if (!book.buyers.size && signalCooldownExpired && paperCooldownExpired) signalBook.delete(mint);
@@ -63,11 +60,7 @@ function recordBuySignal(store, leader, swap, tx) {
   const s = store.data.settings;
   const now = Date.now();
   let book = signalBook.get(swap.mint);
-  if (!book) {
-    book = { mint: swap.mint, buyers: new Map(), firedAt: 0, paperFiredAt: 0 };
-    signalBook.set(swap.mint, book);
-  }
-
+  if (!book) { book = { mint: swap.mint, buyers: new Map(), firedAt: 0, paperFiredAt: 0 }; signalBook.set(swap.mint, book); }
   book.buyers.set(leader.address, {
     address: leader.address,
     label: leader.label,
@@ -77,7 +70,6 @@ function recordBuySignal(store, leader, swap, tx) {
     at: now,
     signature: tx.signature,
   });
-
   const participants = [...book.buyers.values()];
   const walletCount = participants.length;
   const totalWeight = participants.reduce((sum, x) => sum + x.weight, 0);
@@ -85,19 +77,14 @@ function recordBuySignal(store, leader, swap, tx) {
   const cooldownMs = Math.max(0, Number(s.signalCooldownSec || 0)) * 1000;
   const cooled = !book.firedAt || now - book.firedAt >= cooldownMs;
   const newlyQualified = qualified && cooled;
-
   if (newlyQualified) {
     book.firedAt = now;
     store.pushSignal({
-      side: 'BUY',
-      mint: swap.mint,
-      walletCount,
-      totalWeight,
-      wallets: participants.map(x => ({ address: x.address, label: x.label, tier: x.tier, weight: x.weight })),
+      side: 'BUY', mint: swap.mint, walletCount, totalWeight,
+      wallets: participants.map(x => ({ address: x.address, label: x.label, tier: x.tier, weight: x.weight, solAmount: x.solAmount })),
       triggerSignature: tx.signature,
     });
   }
-
   return { walletCount, totalWeight, qualified, newlyQualified, participants };
 }
 
@@ -107,48 +94,46 @@ function paperCooldownAvailable(store, mint) {
   const cooldownMs = Math.max(0, Number(store.data.settings.signalCooldownSec || 0)) * 1000;
   return Date.now() - book.paperFiredAt >= cooldownMs;
 }
+function markPaperFired(mint) { const book = signalBook.get(mint); if (book) book.paperFiredAt = Date.now(); }
 
-function markPaperFired(mint) {
-  const book = signalBook.get(mint);
-  if (book) book.paperFiredAt = Date.now();
+function copiedBuySol(leader, settings, leaderBuySol) {
+  const pct = Number(leader.copyBuyPct || 0);
+  const requested = pct > 0 ? Number(leaderBuySol || 0) * pct / 100 : Number(leader.copyBuySol || settings.copyBuySol);
+  return Math.max(0, Math.min(requested, Number(settings.maxTradeSol)));
 }
 
-async function buyGate({ store, leader, swap, tx }) {
+async function buyGate({ store, leader, swap, tx, leaderBuySol }) {
   const s = store.data.settings;
   if (store.data.blockedMints.includes(swap.mint)) return { ok: false, reason: 'Mint is on Luna blocklist' };
-
-  if (Number(swap.solAmount || 0) < Number(s.minLeaderBuySol || 0)) {
-    return { ok: false, reason: `Leader buy ${fmt(swap.solAmount, 4)} SOL below ${fmt(s.minLeaderBuySol, 4)} SOL signal minimum` };
-  }
-
+  const minBuy = leaderMinBuy(leader, s);
+  if (Number(leaderBuySol || 0) < minBuy) return { ok: false, reason: `Leader buy ${fmt(leaderBuySol, 4)} SOL below ${fmt(minBuy, 4)} SOL minimum` };
   if (s.maxEntryDelaySec > 0 && tx.timestamp) {
     const delay = Math.max(0, Math.round(Date.now() / 1000 - Number(tx.timestamp)));
     if (delay > s.maxEntryDelaySec) return { ok: false, reason: `Entry is ${delay}s old (max ${s.maxEntryDelaySec}s)` };
   }
-
-  if (s.skipExistingPosition) {
+  if (s.skipExistingPosition && !leader.duplicateBuys) {
     const p = store.data.paper.positions.find(x => x.mint === swap.mint && x.tokenAmount > 0);
-    if (p) return { ok: false, reason: 'Existing paper position already open' };
+    if (p) return { ok: false, reason: 'Existing paper position already open (duplicate buys OFF)' };
   }
-
   store.resetDailyIfNeeded();
-  const buySol = Math.min(Number(leader.copyBuySol || s.copyBuySol), Number(s.maxTradeSol));
-  if (s.maxDailyBuySol > 0 && store.data.daily.boughtSol + buySol > s.maxDailyBuySol + 1e-12) {
-    return { ok: false, reason: `Daily paper buy cap reached (${fmt(store.data.daily.boughtSol, 3)}/${fmt(s.maxDailyBuySol, 3)} SOL)` };
-  }
+  const buySol = copiedBuySol(leader, s, leaderBuySol);
+  if (!(buySol > 0)) return { ok: false, reason: 'Calculated copied buy size is zero' };
+  if (s.maxDailyBuySol > 0 && store.data.daily.boughtSol + buySol > s.maxDailyBuySol + 1e-12) return { ok: false, reason: `Daily paper buy cap reached (${fmt(store.data.daily.boughtSol, 3)}/${fmt(s.maxDailyBuySol, 3)} SOL)` };
 
   const snap = await tokenSnapshot(swap.mint);
   if (s.minOrganicScore > 0) {
     const organic = Number(snap.info?.organicScore || 0);
     if (organic < s.minOrganicScore) return { ok: false, reason: `Organic score ${organic.toFixed(1)} below ${s.minOrganicScore}`, snap };
   }
-  if (s.minLiquidityUsd > 0) {
+  const minLiquidity = leader.minLiquidityUsd == null ? Number(s.minLiquidityUsd || 0) : Number(leader.minLiquidityUsd || 0);
+  if (minLiquidity > 0) {
     if (!snap.liquidityUsd) return { ok: false, reason: 'Liquidity unavailable', snap };
-    if (snap.liquidityUsd < s.minLiquidityUsd) return { ok: false, reason: `Liquidity $${Math.round(snap.liquidityUsd).toLocaleString()} below $${s.minLiquidityUsd.toLocaleString()}`, snap };
+    if (snap.liquidityUsd < minLiquidity) return { ok: false, reason: `Liquidity $${Math.round(snap.liquidityUsd).toLocaleString()} below $${minLiquidity.toLocaleString()}`, snap };
   }
-  if (s.maxMarketCapUsd > 0 && snap.marketCapUsd > 0 && snap.marketCapUsd > s.maxMarketCapUsd) {
-    return { ok: false, reason: `Market cap $${Math.round(snap.marketCapUsd).toLocaleString()} above $${s.maxMarketCapUsd.toLocaleString()}`, snap };
-  }
+  const minMcap = Number(leader.minMarketCapUsd || 0);
+  const maxMcap = leader.maxMarketCapUsd == null ? Number(s.maxMarketCapUsd || 0) : Number(leader.maxMarketCapUsd || 0);
+  if (minMcap > 0 && (!snap.marketCapUsd || snap.marketCapUsd < minMcap)) return { ok: false, reason: snap.marketCapUsd ? `Market cap $${Math.round(snap.marketCapUsd).toLocaleString()} below $${minMcap.toLocaleString()}` : 'Market cap unavailable', snap };
+  if (maxMcap > 0 && snap.marketCapUsd > 0 && snap.marketCapUsd > maxMcap) return { ok: false, reason: `Market cap $${Math.round(snap.marketCapUsd).toLocaleString()} above $${maxMcap.toLocaleString()}`, snap };
   return { ok: true, snap, buySol };
 }
 
@@ -157,9 +142,7 @@ async function postTradeAlert(client, store, leader, swap, tx, resultText, snap 
   if ((swap.side === 'BUY' && !s.buyAlerts) || (swap.side === 'SELL' && !s.sellAlerts)) return;
   const ch = await alertChannel(client, store);
   if (!ch?.isTextBased()) return;
-
   if (!snap) snap = await tokenSnapshot(swap.mint);
-  const title = `${swap.side === 'BUY' ? '🟢' : '🔴'} ${leader.label || short(leader.address)} ${swap.side}`;
   const fields = [
     { name: 'Leader', value: `${leader.tier || 'B'} · ${weightOf(leader).toFixed(2)}x · \`${short(leader.address)}\``, inline: true },
     { name: 'Mode', value: leaderMode(leader).toUpperCase(), inline: true },
@@ -167,66 +150,61 @@ async function postTradeAlert(client, store, leader, swap, tx, resultText, snap 
     { name: 'Price', value: snap.price?.usdPrice ? `$${fmt(snap.price.usdPrice, 9)}` : 'Unavailable', inline: true },
     { name: 'Liquidity', value: snap.liquidityUsd ? `$${Math.round(snap.liquidityUsd).toLocaleString()}` : 'Unavailable', inline: true },
   ];
-  if (signal) fields.push({ name: 'V3 signal', value: `${signal.walletCount} wallet${signal.walletCount === 1 ? '' : 's'} · weight ${signal.totalWeight.toFixed(2)} · ${signal.qualified ? '✅ qualified' : '⏳ building'}`, inline: true });
+  if (signal) fields.push({ name: 'V4 signal', value: `${signal.walletCount} wallet${signal.walletCount === 1 ? '' : 's'} · weight ${signal.totalWeight.toFixed(2)} · ${signal.qualified ? '✅ qualified' : '⏳ building'}`, inline: true });
   fields.push({ name: 'Result', value: resultText || 'Track only', inline: false });
-
   const embed = new EmbedBuilder()
-    .setTitle(title)
+    .setTitle(`${swap.side === 'BUY' ? '🟢' : '🔴'} ${leader.label || short(leader.address)} ${swap.side}`)
     .setDescription(`**${snap.info?.symbol || 'TOKEN'}** · \`${swap.mint}\``)
     .addFields(...fields)
     .setURL(explorerTx(tx.signature))
     .setTimestamp(new Date((tx.timestamp || Date.now() / 1000) * 1000))
-    .setFooter({ text: 'Luna V3 · paper-first signal engine' });
+    .setFooter({ text: 'Luna V4 · smart-money + strategy engine' });
   await ch.send({ embeds: [embed] });
 }
 
 function bestPaperLeader(store, participants) {
   const addresses = new Set(participants.map(x => x.address));
-  return store.data.leaders
-    .filter(l => addresses.has(l.address) && l.enabled !== false && leaderMode(l) === 'paper')
-    .sort((a, b) => weightOf(b) - weightOf(a))[0] || null;
+  return store.data.leaders.filter(l => addresses.has(l.address) && l.enabled !== false && leaderMode(l) === 'paper').sort((a, b) => weightOf(b) - weightOf(a))[0] || null;
+}
+
+function hasOpenAutoExit(store, mint, leaderAddress) {
+  return store.data.orders?.some(o => o.status === 'open' && o.mint === mint && o.leaderAddress === leaderAddress && ['take-profit','stop-loss','trailing-stop'].includes(o.kind));
 }
 
 async function handleBuy(client, store, leader, swap, tx) {
   const s = store.data.settings;
-
-  if (Number(swap.solAmount || 0) < Number(s.minLeaderBuySol || 0)) {
-    if (s.skippedAlerts) await postTradeAlert(client, store, leader, swap, tx, `⛔ Ignored: leader buy below ${fmt(s.minLeaderBuySol, 4)} SOL`);
+  const minBuy = leaderMinBuy(leader, s);
+  if (Number(swap.solAmount || 0) < minBuy) {
+    if (s.skippedAlerts) await postTradeAlert(client, store, leader, swap, tx, `⛔ Ignored: leader buy below ${fmt(minBuy, 4)} SOL`);
     return;
   }
-
   const signal = recordBuySignal(store, leader, swap, tx);
-  if (!signal.qualified) {
-    return postTradeAlert(client, store, leader, swap, tx, `⏳ Waiting for ${s.signalMinWallets} wallet(s) / ${Number(s.signalMinWeight).toFixed(2)} weight`, null, signal);
-  }
-
+  if (!signal.qualified) return postTradeAlert(client, store, leader, swap, tx, `⏳ Waiting for ${s.signalMinWallets} wallet(s) / ${Number(s.signalMinWeight).toFixed(2)} weight`, null, signal);
   const executionLeader = bestPaperLeader(store, signal.participants);
-  if (!executionLeader) {
-    return postTradeAlert(client, store, leader, swap, tx, signal.newlyQualified ? '👀 Signal qualified, but participating wallets are TRACK-only' : '👀 Qualified TRACK-only signal remains inside cooldown', null, signal);
-  }
+  if (!executionLeader) return postTradeAlert(client, store, leader, swap, tx, signal.newlyQualified ? '👀 Signal qualified, but participants are TRACK-only' : '👀 Qualified TRACK-only signal remains in cooldown', null, signal);
+  if (!paperCooldownAvailable(store, swap.mint)) return postTradeAlert(client, store, leader, swap, tx, `🛡️ Paper signal already executed; ${s.signalCooldownSec}s duplicate cooldown active`, null, signal);
 
-  if (!paperCooldownAvailable(store, swap.mint)) {
-    return postTradeAlert(client, store, leader, swap, tx, `🛡️ Paper signal already executed; ${s.signalCooldownSec}s duplicate cooldown active`, null, signal);
-  }
-
-  const gate = await buyGate({ store, leader: executionLeader, swap, tx });
+  const participant = signal.participants.find(x => x.address === executionLeader.address);
+  const executionLeaderBuySol = Number(participant?.solAmount || swap.solAmount || 0);
+  const gate = await buyGate({ store, leader: executionLeader, swap, tx, leaderBuySol: executionLeaderBuySol });
   if (!gate.ok) return postTradeAlert(client, store, leader, swap, tx, `⛔ Qualified signal skipped: ${gate.reason}`, gate.snap, signal);
   if (!s.paperTrading) return postTradeAlert(client, store, leader, swap, tx, '⏸️ Qualified signal; paper trading master switch OFF', gate.snap, signal);
 
   try {
-    const r = await paperBuy({
-      store,
-      mint: swap.mint,
-      solAmount: gate.buySol,
-      leaderAddress: executionLeader.address,
-      leaderLabel: executionLeader.label,
-      signature: tx.signature,
-    });
+    const r = await paperBuy({ store, mint: swap.mint, solAmount: gate.buySol, leaderAddress: executionLeader.address, leaderLabel: executionLeader.label, signature: tx.signature });
     markPaperFired(swap.mint);
     store.resetDailyIfNeeded();
     store.data.daily.boughtSol += r.solAmount;
+    let autoExitText = '';
+    const tp = Number(executionLeader.autoTakeProfitPct || 0), sl = Number(executionLeader.autoStopLossPct || 0), trail = Number(executionLeader.trailingStopPct || 0);
+    if ((tp > 0 || sl > 0 || trail > 0) && !hasOpenAutoExit(store, swap.mint, executionLeader.address)) {
+      try {
+        const exits = await createAutoSellSet({ store, mint: swap.mint, takeProfitPct: tp, stopLossPct: sl, trailingPct: trail, sellPct: 100, mode: 'paper', leaderAddress: executionLeader.address });
+        autoExitText = ` · auto-exits #${exits.map(x => x.id).join('/#')}`;
+      } catch (e) { autoExitText = ` · auto-exit setup failed: ${String(e.message || e).slice(0, 100)}`; }
+    }
     store.save();
-    return postTradeAlert(client, store, leader, swap, tx, `🧪 PAPER BUY ${r.solAmount.toFixed(3)} SOL · source ${executionLeader.label || short(executionLeader.address)}`, gate.snap, signal);
+    return postTradeAlert(client, store, leader, swap, tx, `🧪 PAPER BUY ${r.solAmount.toFixed(3)} SOL · source ${executionLeader.label || short(executionLeader.address)}${Number(executionLeader.copyBuyPct || 0) > 0 ? ` · ${executionLeader.copyBuyPct}% sizing` : ''}${autoExitText}`, gate.snap, signal);
   } catch (e) {
     return postTradeAlert(client, store, leader, swap, tx, `⛔ Paper buy skipped: ${String(e.message).slice(0, 350)}`, gate.snap, signal);
   }
@@ -236,11 +214,10 @@ async function handleSell(client, store, leader, swap, tx) {
   const s = store.data.settings;
   const mode = leaderMode(leader);
   if (mode === 'track') return postTradeAlert(client, store, leader, swap, tx, '👀 Track-only sell signal');
-  if (mode === 'legacy-live') return postTradeAlert(client, store, leader, swap, tx, '⚠️ Legacy live mode is alerts-only in V3');
-
+  if (mode === 'legacy-live') return postTradeAlert(client, store, leader, swap, tx, '⚠️ Legacy live mode is alerts-only in V4');
+  if (leader.copySells === false) return postTradeAlert(client, store, leader, swap, tx, '🛡️ Copy sells disabled for this wallet; TP/SL strategy remains independent');
   const owned = store.data.paper.positions.find(p => p.mint === swap.mint && p.leaderAddress === leader.address && p.tokenAmount > 0);
   if (!owned) return postTradeAlert(client, store, leader, swap, tx, 'ℹ️ No paper position sourced from this leader; sell not copied');
-
   let sellPct = 1;
   if (s.sellMode === 'proportional') {
     try {
@@ -249,49 +226,27 @@ async function handleSell(client, store, leader, swap, tx) {
       sellPct = before > 0 ? Math.min(1, Math.max(0, swap.tokenAmount / before)) : 1;
     } catch { sellPct = 1; }
   }
-
   if (!s.paperTrading) return postTradeAlert(client, store, leader, swap, tx, '⏸️ Paper trading master switch OFF');
   try {
     const r = await paperSell({ store, mint: swap.mint, sellPct, leaderAddress: leader.address, leaderLabel: leader.label, signature: tx.signature });
     return postTradeAlert(client, store, leader, swap, tx, `🧪 PAPER SELL ${(r.sellPct * 100).toFixed(1)}% · PnL ${r.pnlSol >= 0 ? '+' : ''}${r.pnlSol.toFixed(4)} SOL`);
-  } catch (e) {
-    return postTradeAlert(client, store, leader, swap, tx, `ℹ️ ${String(e.message).slice(0, 350)}`);
-  }
+  } catch (e) { return postTradeAlert(client, store, leader, swap, tx, `ℹ️ ${String(e.message).slice(0, 350)}`); }
 }
 
 async function pollLeader(client, store, leader) {
-  // Cheap preflight: if the latest signature has not changed, there is no
-  // reason to spend a Helius enhanced-transaction request on this wallet.
   let latest = null;
-  try {
-    latest = await getLatestSignature(leader.address);
-  } catch (e) {
-    // Fail open: a public/dedicated RPC outage must not stop monitoring.
-    console.warn(`Signature preflight ${short(leader.address)}:`, e.message);
-  }
-
+  try { latest = await getLatestSignature(leader.address); }
+  catch (e) { console.warn(`Signature preflight ${short(leader.address)}:`, e.message); }
   if (latest && leader.lastSignature && latest.signature === leader.lastSignature) return 0;
-  if (latest && !leader.lastSignature) {
-    leader.lastSignature = latest.signature;
-    leader.lastTimestamp = Number(latest.blockTime || 0);
-    return 0;
-  }
-
+  if (latest && !leader.lastSignature) { leader.lastSignature = latest.signature; leader.lastTimestamp = Number(latest.blockTime || 0); return 0; }
   const txs = await getRecentTransactions(leader.address, config.recentTxLimit, { fresh: true });
   if (!txs.length) return 0;
-
-  if (!leader.lastSignature) {
-    leader.lastSignature = txs[0].signature;
-    leader.lastTimestamp = Number(txs[0].timestamp || 0);
-    return 0;
-  }
-
+  if (!leader.lastSignature) { leader.lastSignature = txs[0].signature; leader.lastTimestamp = Number(txs[0].timestamp || 0); return 0; }
   const idx = txs.findIndex(t => t.signature === leader.lastSignature);
   let fresh;
   if (idx >= 0) fresh = txs.slice(0, idx);
   else if (leader.lastTimestamp) fresh = txs.filter(t => Number(t.timestamp || 0) > Number(leader.lastTimestamp));
   else fresh = txs.slice(0, 1);
-
   fresh = fresh.reverse();
   let activity = 0;
   for (const tx of fresh) {
@@ -301,11 +256,7 @@ async function pollLeader(client, store, leader) {
     leader.lastSignature = tx.signature;
     leader.lastTimestamp = Math.max(Number(leader.lastTimestamp || 0), Number(tx.timestamp || 0));
   }
-
-  if (!fresh.length) {
-    leader.lastSignature = txs[0].signature;
-    leader.lastTimestamp = Math.max(Number(leader.lastTimestamp || 0), Number(txs[0].timestamp || 0));
-  }
+  if (!fresh.length) { leader.lastSignature = txs[0].signature; leader.lastTimestamp = Math.max(Number(leader.lastTimestamp || 0), Number(txs[0].timestamp || 0)); }
   if (activity) leader.lastActivityAt = Date.now();
   return activity;
 }
@@ -321,28 +272,19 @@ async function pollPrices(client, store) {
     if (!p) continue;
     const hit = a.direction === 'above' ? p >= a.price : p <= a.price;
     if (!hit) continue;
-    a.active = false;
-    store.save();
+    a.active = false; store.save();
     let info = null; try { info = await getTokenInfo(a.mint); } catch {}
     await ch.send(`🔔 **PRICE ALERT #${a.id}** — **${info?.symbol || short(a.mint)}** is $${fmt(p, 10)}, ${a.direction} your $${fmt(a.price, 10)} trigger.\nMint: \`${a.mint}\``);
   }
 }
 
 export function startMonitors(client, store) {
-  let walletBusy = false;
-  let priceBusy = false;
-
-  // One due wallet per scheduler tick. Each wallet gets its own adaptive
-  // nextPollAt, which keeps API usage roughly bounded as the list grows.
+  let walletBusy = false, priceBusy = false;
   setInterval(async () => {
     if (walletBusy || store.data.settings.paused) return;
     const now = Date.now();
-    const due = store.data.leaders
-      .filter(l => l.enabled !== false && Number(l.nextPollAt || 0) <= now)
-      .sort((a, b) => Number(a.nextPollAt || 0) - Number(b.nextPollAt || 0));
-    const leader = due[0];
-    if (!leader) return;
-
+    const due = store.data.leaders.filter(l => l.enabled !== false && Number(l.nextPollAt || 0) <= now).sort((a, b) => Number(a.nextPollAt || 0) - Number(b.nextPollAt || 0));
+    const leader = due[0]; if (!leader) return;
     walletBusy = true;
     try {
       const activity = await pollLeader(client, store, leader);
@@ -351,14 +293,10 @@ export function startMonitors(client, store) {
       leader.nextPollAt = Date.now() + (recentlyActive ? config.walletHotPollMs : config.walletIdlePollMs);
     } catch (e) {
       leader.pollErrors = Number(leader.pollErrors || 0) + 1;
-      const rateLimited = isHeliusRateLimitError(e);
-      const retry = Number(e?.retryAfterMs || 0);
+      const rateLimited = isHeliusRateLimitError(e), retry = Number(e?.retryAfterMs || 0);
       leader.nextPollAt = Date.now() + (rateLimited ? Math.max(config.walletIdlePollMs, retry) : Math.min(300000, config.walletIdlePollMs * Math.max(1, leader.pollErrors)));
       console.error(`Leader poll ${leader.address}:`, e.message);
-    } finally {
-      store.save();
-      walletBusy = false;
-    }
+    } finally { store.save(); walletBusy = false; }
   }, config.walletSchedulerMs);
 
   setInterval(async () => {
