@@ -4,6 +4,7 @@ const DEX = 'https://api.dexscreener.com';
 const RUG = 'https://api.rugcheck.xyz/v1';
 const cache = new Map();
 
+function clamp(n, min, max) { return Math.max(min, Math.min(max, Number(n || 0))); }
 function cached(key, ttlMs) {
   const row = cache.get(key);
   return row && Date.now() - row.at < ttlMs ? row.value : null;
@@ -17,7 +18,7 @@ async function json(url, options = {}) {
 
 export async function getDexPairs(mint) {
   const key = `pairs:${mint}`;
-  const hit = cached(key, 15000);
+  const hit = cached(key, 12000);
   if (hit) return hit;
   const rows = await json(`${DEX}/token-pairs/v1/solana/${mint}`);
   return put(key, Array.isArray(rows) ? rows : []);
@@ -28,16 +29,54 @@ export async function getBestDexPair(mint) {
   return [...rows].sort((a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0))[0] || null;
 }
 
-export async function getRugSummary(mint) {
+export async function getRugReport(mint) {
   const key = `rug:${mint}`;
   const hit = cached(key, 60000);
   if (hit) return hit;
   try {
-    const report = await json(`${RUG}/tokens/${mint}/report/summary`);
+    const report = await json(`${RUG}/tokens/${mint}/report`);
     return put(key, report || null);
-  } catch (e) {
-    return put(key, { unavailable: true, error: String(e.message || e) });
+  } catch (fullError) {
+    try {
+      const summary = await json(`${RUG}/tokens/${mint}/report/summary`);
+      return put(key, summary || null);
+    } catch (summaryError) {
+      return put(key, { unavailable: true, error: String(summaryError.message || fullError.message || summaryError) });
+    }
   }
+}
+
+function holderPct(holder) {
+  for (const key of ['pct', 'percentage', 'percent', 'supplyPct']) {
+    const n = Number(holder?.[key]);
+    if (Number.isFinite(n)) return n > 1 && n <= 100 ? n : n >= 0 && n <= 1 ? n * 100 : n;
+  }
+  return null;
+}
+
+function creatorPct(report) {
+  for (const key of ['creatorHoldingPct', 'creatorPercentage', 'creatorPct']) {
+    const n = Number(report?.[key]);
+    if (Number.isFinite(n)) return n > 1 && n <= 100 ? n : n >= 0 && n <= 1 ? n * 100 : n;
+  }
+  return null;
+}
+
+function extractRiskIntel(report) {
+  const topHolders = Array.isArray(report?.topHolders) ? report.topHolders : [];
+  const top10Pcts = topHolders.slice(0, 10).map(holderPct).filter(Number.isFinite);
+  const top10HolderPct = top10Pcts.length ? top10Pcts.reduce((a, b) => a + b, 0) : null;
+  const token = report?.token || report?.tokenMeta || {};
+  const markets = Array.isArray(report?.markets) ? report.markets : [];
+  const lockedPcts = markets.map(m => Number(m?.lp?.lpLockedPct ?? m?.lpLockedPct)).filter(Number.isFinite);
+  return {
+    top10HolderPct,
+    creatorHoldingPct: creatorPct(report),
+    mintAuthority: token?.mintAuthority || report?.mintAuthority || null,
+    freezeAuthority: token?.freezeAuthority || report?.freezeAuthority || null,
+    totalHolders: Number(report?.totalHolders || report?.holderCount || 0) || null,
+    lpLockedPct: lockedPcts.length ? Math.max(...lockedPcts) : null,
+  };
 }
 
 export async function getTokenIntel(mint) {
@@ -48,7 +87,7 @@ export async function getTokenIntel(mint) {
     getTokenInfo(mint),
     getPrices([mint]),
     getBestDexPair(mint),
-    getRugSummary(mint),
+    getRugReport(mint),
   ]);
   const info = infoResult.status === 'fulfilled' ? infoResult.value : null;
   const prices = pricesResult.status === 'fulfilled' ? pricesResult.value : {};
@@ -56,6 +95,7 @@ export async function getTokenIntel(mint) {
   const pair = pairResult.status === 'fulfilled' ? pairResult.value : null;
   const rug = rugResult.status === 'fulfilled' ? rugResult.value : null;
   const risks = Array.isArray(rug?.risks) ? rug.risks : [];
+  const riskIntel = extractRiskIntel(rug || {});
   const intel = {
     mint,
     name: pair?.baseToken?.address === mint ? pair.baseToken.name : info?.name || pair?.baseToken?.name || 'Unknown',
@@ -69,6 +109,8 @@ export async function getTokenIntel(mint) {
     volume24h: Number(pair?.volume?.h24 || 0),
     buys5m: Number(pair?.txns?.m5?.buys || 0),
     sells5m: Number(pair?.txns?.m5?.sells || 0),
+    buys1h: Number(pair?.txns?.h1?.buys || 0),
+    sells1h: Number(pair?.txns?.h1?.sells || 0),
     priceChange5m: Number(pair?.priceChange?.m5 || 0),
     priceChange1h: Number(pair?.priceChange?.h1 || 0),
     pairCreatedAt: Number(pair?.pairCreatedAt || 0),
@@ -79,7 +121,8 @@ export async function getTokenIntel(mint) {
     rugUnavailable: Boolean(rug?.unavailable),
     rugged: rug?.rugged === true,
     rugScore: Number.isFinite(Number(rug?.score)) ? Number(rug.score) : null,
-    risks: risks.slice(0, 8).map(r => ({
+    ...riskIntel,
+    risks: risks.slice(0, 10).map(r => ({
       name: r.name || r.type || 'Risk',
       level: r.level || r.severity || 'unknown',
       description: r.description || '',
@@ -102,6 +145,24 @@ export async function getLatestSolanaProfiles(limit = 15) {
   return rows.slice(0, Math.max(1, Math.min(30, Number(limit) || 15)));
 }
 
+export function discoveryScore(row) {
+  const liq = Number(row?.liquidityUsd || 0);
+  const vol = Number(row?.volume1h || 0);
+  const buys = Number(row?.buys5m || 0);
+  const sells = Number(row?.sells5m || 0);
+  const change = Number(row?.priceChange1h || 0);
+  const ageHours = row?.pairCreatedAt ? Math.max(0, (Date.now() - Number(row.pairCreatedAt)) / 3600000) : null;
+
+  const liquidity = liq >= 250000 ? 25 : liq >= 100000 ? 22 : liq >= 50000 ? 18 : liq >= 25000 ? 14 : liq >= 10000 ? 8 : 2;
+  const turnover = liq > 0 ? vol / liq : 0;
+  const activity = turnover >= 2 ? 25 : turnover >= 1 ? 22 : turnover >= 0.5 ? 17 : turnover >= 0.2 ? 10 : 4;
+  const ratio = buys / Math.max(1, sells);
+  const flow = buys + sells < 4 ? 4 : ratio >= 2.5 ? 20 : ratio >= 1.5 ? 16 : ratio >= 1 ? 12 : ratio >= 0.7 ? 7 : 2;
+  const momentum = change >= 2 && change <= 35 ? 15 : change > 35 && change <= 80 ? 10 : change > 80 && change <= 150 ? 4 : change < -25 || change > 150 ? 0 : 7;
+  const ageScore = ageHours == null ? 5 : ageHours < 0.05 ? 5 : ageHours <= 6 ? 15 : ageHours <= 24 ? 12 : ageHours <= 72 ? 8 : 4;
+  return Math.round(clamp(liquidity + activity + flow + momentum + ageScore, 0, 100));
+}
+
 export async function getDiscoveryRadar(limit = 10) {
   const key = 'boosts';
   const hit = cached(key, 10000);
@@ -111,11 +172,17 @@ export async function getDiscoveryRadar(limit = 10) {
     boosts = Array.isArray(payload) ? payload.filter(x => x?.chainId === 'solana' && x?.tokenAddress) : [];
     put(key, boosts);
   }
-  const selected = boosts.slice(0, Math.max(5, Math.min(30, Number(limit) * 2 || 20)));
-  const intel = await Promise.all(selected.map(async b => {
+  const profiles = await getLatestSolanaProfiles(20).catch(() => []);
+  const candidates = new Map();
+  for (const row of [...boosts.slice(0, 25), ...profiles]) {
+    const mint = row?.tokenAddress;
+    if (mint && !candidates.has(mint)) candidates.set(mint, row);
+  }
+  const selected = [...candidates.values()].slice(0, Math.max(10, Math.min(35, Number(limit) * 3 || 24)));
+  const rows = await Promise.all(selected.map(async b => {
     try {
       const pair = await getBestDexPair(b.tokenAddress);
-      return {
+      const row = {
         mint: b.tokenAddress,
         amount: Number(b.amount || 0),
         totalAmount: Number(b.totalAmount || 0),
@@ -128,14 +195,14 @@ export async function getDiscoveryRadar(limit = 10) {
         buys5m: Number(pair?.txns?.m5?.buys || 0),
         sells5m: Number(pair?.txns?.m5?.sells || 0),
         priceChange1h: Number(pair?.priceChange?.h1 || 0),
+        pairCreatedAt: Number(pair?.pairCreatedAt || 0),
         pairUrl: pair?.url || b.url || null,
       };
-    } catch {
-      return null;
-    }
+      return { ...row, radarScore: discoveryScore(row) };
+    } catch { return null; }
   }));
-  return intel.filter(Boolean)
-    .sort((a, b) => (b.volume1h + b.liquidityUsd * 0.05 + b.totalAmount * 100) - (a.volume1h + a.liquidityUsd * 0.05 + a.totalAmount * 100))
+  return rows.filter(Boolean)
+    .sort((a, b) => b.radarScore - a.radarScore)
     .slice(0, Math.max(1, Math.min(20, Number(limit) || 10)));
 }
 

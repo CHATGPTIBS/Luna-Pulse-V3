@@ -1,6 +1,7 @@
 import { REST, Routes } from 'discord.js';
 import { config } from './config.js';
 import { commands } from './commands.js';
+import { v5Commands } from './v5-commands.js';
 
 function normalizeOptions(options = []) {
   const rows = options.map(option => ({
@@ -17,10 +18,16 @@ function normalizeOptions(options = []) {
   return rows.sort((a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)));
 }
 
-const normalizedCommands = commands.map(command => ({
+const allCommands = [...commands, ...v5Commands];
+const seen = new Set();
+const normalizedCommands = allCommands.map(command => ({
   ...command,
   options: normalizeOptions(command.options || []),
-}));
+})).filter(command => {
+  if (seen.has(command.name)) throw new Error(`Duplicate Discord command: ${command.name}`);
+  seen.add(command.name);
+  return true;
+});
 
 const rest = new REST({ version: '10' }).setToken(config.discordToken);
 const route = config.guildId

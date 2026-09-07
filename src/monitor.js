@@ -1,11 +1,15 @@
 import { EmbedBuilder } from 'discord.js';
 import { getRecentTransactions, isHeliusRateLimitError } from './helius.js';
-import { getPrices, getTokenInfo } from './jupiter.js';
+import { getPrices } from './jupiter.js';
 import { getLatestSignature, getTokenBalanceRaw } from './solana.js';
-import { config } from './config.js';
+import { config, WSOL } from './config.js';
 import { parseSwap, short, fmt } from './swap.js';
 import { paperBuy, paperSell } from './paper.js';
 import { createAutoSellSet } from './strategy.js';
+import { getTokenIntel } from './market.js';
+import { calculateAlphaScore } from './alpha.js';
+import { startRealtimeWalletWake } from './realtime.js';
+import { startV5Discord } from './v5-discord.js';
 
 const signalBook = new Map();
 const tokenCache = new Map();
@@ -24,19 +28,21 @@ async function alertChannel(client, store) {
 
 async function tokenSnapshot(mint) {
   const cached = tokenCache.get(mint);
-  if (cached && Date.now() - cached.at < 30000) return cached.value;
-  let info = null;
-  let price = null;
+  if (cached && Date.now() - cached.at < 10000) return cached.value;
+  let intel = null, prices = {};
   try {
-    const [i, p] = await Promise.all([getTokenInfo(mint), getPrices([mint])]);
-    info = i;
-    price = p?.[mint] || null;
+    const results = await Promise.allSettled([getTokenIntel(mint), getPrices([WSOL, mint])]);
+    intel = results[0].status === 'fulfilled' ? results[0].value : null;
+    prices = results[1].status === 'fulfilled' ? results[1].value : {};
   } catch {}
+  const price = prices?.[mint] || null;
   const value = {
-    info,
+    intel,
+    info: intel?.rawInfo || null,
     price,
-    liquidityUsd: Number(price?.liquidity || 0),
-    marketCapUsd: Number(price?.marketCap || price?.marketCapUsd || price?.mcap || info?.marketCap || info?.marketCapUsd || info?.mcap || 0),
+    solPriceUsd: Number(prices?.[WSOL]?.usdPrice || 0),
+    liquidityUsd: Number(intel?.liquidityUsd || price?.liquidity || 0),
+    marketCapUsd: Number(intel?.marketCapUsd || price?.marketCap || price?.marketCapUsd || 0),
   };
   tokenCache.set(mint, { at: Date.now(), value });
   return value;
@@ -67,6 +73,7 @@ function recordBuySignal(store, leader, swap, tx) {
     tier: leader.tier || 'B',
     weight: weightOf(leader),
     solAmount: Number(swap.solAmount || 0),
+    tokenAmount: Number(swap.tokenAmount || 0),
     at: now,
     signature: tx.signature,
   });
@@ -83,9 +90,21 @@ function recordBuySignal(store, leader, swap, tx) {
       side: 'BUY', mint: swap.mint, walletCount, totalWeight,
       wallets: participants.map(x => ({ address: x.address, label: x.label, tier: x.tier, weight: x.weight, solAmount: x.solAmount })),
       triggerSignature: tx.signature,
+      alphaScore: null,
+      chasePct: null,
     });
   }
   return { walletCount, totalWeight, qualified, newlyQualified, participants };
+}
+
+function annotateLatestSignal(store, mint, alpha, chasePct) {
+  const row = store.data.signalHistory.find(x => x.mint === mint && x.side === 'BUY');
+  if (!row) return;
+  row.alphaScore = alpha?.score ?? null;
+  row.alphaLabel = alpha?.label ?? null;
+  row.alphaBreakdown = alpha?.breakdown ?? null;
+  row.chasePct = Number.isFinite(Number(chasePct)) ? Number(chasePct) : null;
+  store.save();
 }
 
 function paperCooldownAvailable(store, mint) {
@@ -102,7 +121,7 @@ function copiedBuySol(leader, settings, leaderBuySol) {
   return Math.max(0, Math.min(requested, Number(settings.maxTradeSol)));
 }
 
-async function buyGate({ store, leader, swap, tx, leaderBuySol }) {
+async function buyGate({ store, leader, swap, tx, leaderBuySol, leaderTokenAmount, signal }) {
   const s = store.data.settings;
   if (store.data.blockedMints.includes(swap.mint)) return { ok: false, reason: 'Mint is on Luna blocklist' };
   const minBuy = leaderMinBuy(leader, s);
@@ -121,8 +140,12 @@ async function buyGate({ store, leader, swap, tx, leaderBuySol }) {
   if (s.maxDailyBuySol > 0 && store.data.daily.boughtSol + buySol > s.maxDailyBuySol + 1e-12) return { ok: false, reason: `Daily paper buy cap reached (${fmt(store.data.daily.boughtSol, 3)}/${fmt(s.maxDailyBuySol, 3)} SOL)` };
 
   const snap = await tokenSnapshot(swap.mint);
+  const intel = snap.intel || {};
+  if (intel.rugged) return { ok: false, reason: 'RugCheck currently marks token as rugged', snap };
+  if ((intel.risks || []).some(r => /critical|danger/i.test(String(r.level || '')))) return { ok: false, reason: 'Critical token-risk signal detected', snap };
+
   if (s.minOrganicScore > 0) {
-    const organic = Number(snap.info?.organicScore || 0);
+    const organic = Number(intel.organicScore || snap.info?.organicScore || 0);
     if (organic < s.minOrganicScore) return { ok: false, reason: `Organic score ${organic.toFixed(1)} below ${s.minOrganicScore}`, snap };
   }
   const minLiquidity = leader.minLiquidityUsd == null ? Number(s.minLiquidityUsd || 0) : Number(leader.minLiquidityUsd || 0);
@@ -134,10 +157,28 @@ async function buyGate({ store, leader, swap, tx, leaderBuySol }) {
   const maxMcap = leader.maxMarketCapUsd == null ? Number(s.maxMarketCapUsd || 0) : Number(leader.maxMarketCapUsd || 0);
   if (minMcap > 0 && (!snap.marketCapUsd || snap.marketCapUsd < minMcap)) return { ok: false, reason: snap.marketCapUsd ? `Market cap $${Math.round(snap.marketCapUsd).toLocaleString()} below $${minMcap.toLocaleString()}` : 'Market cap unavailable', snap };
   if (maxMcap > 0 && snap.marketCapUsd > 0 && snap.marketCapUsd > maxMcap) return { ok: false, reason: `Market cap $${Math.round(snap.marketCapUsd).toLocaleString()} above $${maxMcap.toLocaleString()}`, snap };
-  return { ok: true, snap, buySol };
+
+  let leaderEntryPriceUsd = null, chasePct = null;
+  if (Number(leaderTokenAmount || 0) > 0 && snap.solPriceUsd > 0) {
+    leaderEntryPriceUsd = (Number(leaderBuySol || 0) * snap.solPriceUsd) / Number(leaderTokenAmount);
+    if (leaderEntryPriceUsd > 0 && Number(intel.priceUsd || snap.price?.usdPrice || 0) > 0) {
+      chasePct = ((Number(intel.priceUsd || snap.price.usdPrice) / leaderEntryPriceUsd) - 1) * 100;
+    }
+  }
+  const maxChase = leader.maxChasePct == null ? Number(s.maxChasePct || 0) : Number(leader.maxChasePct || 0);
+  if (maxChase > 0 && Number.isFinite(chasePct) && chasePct > maxChase) {
+    return { ok: false, reason: `Price already ${chasePct.toFixed(1)}% above leader entry (max ${maxChase}%)`, snap, chasePct, leaderEntryPriceUsd };
+  }
+
+  const alpha = calculateAlphaScore({ intel, signal, chasePct, tradeSol: buySol, solPriceUsd: snap.solPriceUsd });
+  const minAlpha = leader.minAlphaScore == null ? Number(s.minAlphaScore || 0) : Number(leader.minAlphaScore || 0);
+  if (minAlpha > 0 && alpha.score < minAlpha) {
+    return { ok: false, reason: `Luna Alpha ${alpha.score}/100 below minimum ${minAlpha}`, snap, chasePct, leaderEntryPriceUsd, alpha };
+  }
+  return { ok: true, snap, buySol, chasePct, leaderEntryPriceUsd, alpha };
 }
 
-async function postTradeAlert(client, store, leader, swap, tx, resultText, snap = null, signal = null) {
+async function postTradeAlert(client, store, leader, swap, tx, resultText, snap = null, signal = null, decision = null) {
   const s = store.data.settings;
   if ((swap.side === 'BUY' && !s.buyAlerts) || (swap.side === 'SELL' && !s.sellAlerts)) return;
   const ch = await alertChannel(client, store);
@@ -147,18 +188,20 @@ async function postTradeAlert(client, store, leader, swap, tx, resultText, snap 
     { name: 'Leader', value: `${leader.tier || 'B'} · ${weightOf(leader).toFixed(2)}x · \`${short(leader.address)}\``, inline: true },
     { name: 'Mode', value: leaderMode(leader).toUpperCase(), inline: true },
     { name: 'Leader trade', value: swap.side === 'BUY' ? `≈ ${fmt(swap.solAmount, 4)} SOL` : `${fmt(swap.tokenAmount, 4)} tokens → ≈ ${fmt(swap.solAmount, 4)} SOL`, inline: true },
-    { name: 'Price', value: snap.price?.usdPrice ? `$${fmt(snap.price.usdPrice, 9)}` : 'Unavailable', inline: true },
+    { name: 'Price', value: snap.price?.usdPrice ? `$${fmt(snap.price.usdPrice, 9)}` : snap.intel?.priceUsd ? `$${fmt(snap.intel.priceUsd, 9)}` : 'Unavailable', inline: true },
     { name: 'Liquidity', value: snap.liquidityUsd ? `$${Math.round(snap.liquidityUsd).toLocaleString()}` : 'Unavailable', inline: true },
   ];
-  if (signal) fields.push({ name: 'V4 signal', value: `${signal.walletCount} wallet${signal.walletCount === 1 ? '' : 's'} · weight ${signal.totalWeight.toFixed(2)} · ${signal.qualified ? '✅ qualified' : '⏳ building'}`, inline: true });
+  if (signal) fields.push({ name: 'V5 signal', value: `${signal.walletCount} wallet${signal.walletCount === 1 ? '' : 's'} · weight ${signal.totalWeight.toFixed(2)} · ${signal.qualified ? '✅ qualified' : '⏳ building'}`, inline: true });
+  if (decision?.alpha) fields.push({ name: 'Luna Alpha', value: `**${decision.alpha.score}/100 — ${decision.alpha.label}**`, inline: true });
+  if (Number.isFinite(Number(decision?.chasePct))) fields.push({ name: 'Entry chase', value: `${decision.chasePct >= 0 ? '+' : ''}${Number(decision.chasePct).toFixed(1)}% vs leader`, inline: true });
   fields.push({ name: 'Result', value: resultText || 'Track only', inline: false });
   const embed = new EmbedBuilder()
     .setTitle(`${swap.side === 'BUY' ? '🟢' : '🔴'} ${leader.label || short(leader.address)} ${swap.side}`)
-    .setDescription(`**${snap.info?.symbol || 'TOKEN'}** · \`${swap.mint}\``)
+    .setDescription(`**${snap.intel?.symbol || snap.info?.symbol || 'TOKEN'}** · \`${swap.mint}\``)
     .addFields(...fields)
     .setURL(explorerTx(tx.signature))
     .setTimestamp(new Date((tx.timestamp || Date.now() / 1000) * 1000))
-    .setFooter({ text: 'Luna V4 · smart-money + strategy engine' });
+    .setFooter({ text: 'Luna V5 Alpha · realtime smart-money engine' });
   await ch.send({ embeds: [embed] });
 }
 
@@ -166,7 +209,6 @@ function bestPaperLeader(store, participants) {
   const addresses = new Set(participants.map(x => x.address));
   return store.data.leaders.filter(l => addresses.has(l.address) && l.enabled !== false && leaderMode(l) === 'paper').sort((a, b) => weightOf(b) - weightOf(a))[0] || null;
 }
-
 function hasOpenAutoExit(store, mint, leaderAddress) {
   return store.data.orders?.some(o => o.status === 'open' && o.mint === mint && o.leaderAddress === leaderAddress && ['take-profit','stop-loss','trailing-stop'].includes(o.kind));
 }
@@ -186,9 +228,11 @@ async function handleBuy(client, store, leader, swap, tx) {
 
   const participant = signal.participants.find(x => x.address === executionLeader.address);
   const executionLeaderBuySol = Number(participant?.solAmount || swap.solAmount || 0);
-  const gate = await buyGate({ store, leader: executionLeader, swap, tx, leaderBuySol: executionLeaderBuySol });
-  if (!gate.ok) return postTradeAlert(client, store, leader, swap, tx, `⛔ Qualified signal skipped: ${gate.reason}`, gate.snap, signal);
-  if (!s.paperTrading) return postTradeAlert(client, store, leader, swap, tx, '⏸️ Qualified signal; paper trading master switch OFF', gate.snap, signal);
+  const executionLeaderTokenAmount = Number(participant?.tokenAmount || swap.tokenAmount || 0);
+  const gate = await buyGate({ store, leader: executionLeader, swap, tx, leaderBuySol: executionLeaderBuySol, leaderTokenAmount: executionLeaderTokenAmount, signal });
+  if (gate.alpha || Number.isFinite(Number(gate.chasePct))) annotateLatestSignal(store, swap.mint, gate.alpha, gate.chasePct);
+  if (!gate.ok) return postTradeAlert(client, store, leader, swap, tx, `⛔ Qualified signal skipped: ${gate.reason}`, gate.snap, signal, gate);
+  if (!s.paperTrading) return postTradeAlert(client, store, leader, swap, tx, '⏸️ Qualified signal; paper trading master switch OFF', gate.snap, signal, gate);
 
   try {
     const r = await paperBuy({ store, mint: swap.mint, solAmount: gate.buySol, leaderAddress: executionLeader.address, leaderLabel: executionLeader.label, signature: tx.signature });
@@ -200,13 +244,13 @@ async function handleBuy(client, store, leader, swap, tx) {
     if ((tp > 0 || sl > 0 || trail > 0) && !hasOpenAutoExit(store, swap.mint, executionLeader.address)) {
       try {
         const exits = await createAutoSellSet({ store, mint: swap.mint, takeProfitPct: tp, stopLossPct: sl, trailingPct: trail, sellPct: 100, mode: 'paper', leaderAddress: executionLeader.address });
-        autoExitText = ` · auto-exits #${exits.map(x => x.id).join('/#')}`;
+        autoExitText = ` · protected by #${exits.map(x => x.id).join('/#')}`;
       } catch (e) { autoExitText = ` · auto-exit setup failed: ${String(e.message || e).slice(0, 100)}`; }
     }
     store.save();
-    return postTradeAlert(client, store, leader, swap, tx, `🧪 PAPER BUY ${r.solAmount.toFixed(3)} SOL · source ${executionLeader.label || short(executionLeader.address)}${Number(executionLeader.copyBuyPct || 0) > 0 ? ` · ${executionLeader.copyBuyPct}% sizing` : ''}${autoExitText}`, gate.snap, signal);
+    return postTradeAlert(client, store, leader, swap, tx, `🧪 PAPER BUY ${r.solAmount.toFixed(3)} SOL · source ${executionLeader.label || short(executionLeader.address)}${Number(executionLeader.copyBuyPct || 0) > 0 ? ` · ${executionLeader.copyBuyPct}% sizing` : ''}${autoExitText}`, gate.snap, signal, gate);
   } catch (e) {
-    return postTradeAlert(client, store, leader, swap, tx, `⛔ Paper buy skipped: ${String(e.message).slice(0, 350)}`, gate.snap, signal);
+    return postTradeAlert(client, store, leader, swap, tx, `⛔ Paper buy skipped: ${String(e.message).slice(0, 350)}`, gate.snap, signal, gate);
   }
 }
 
@@ -214,7 +258,7 @@ async function handleSell(client, store, leader, swap, tx) {
   const s = store.data.settings;
   const mode = leaderMode(leader);
   if (mode === 'track') return postTradeAlert(client, store, leader, swap, tx, '👀 Track-only sell signal');
-  if (mode === 'legacy-live') return postTradeAlert(client, store, leader, swap, tx, '⚠️ Legacy live mode is alerts-only in V4');
+  if (mode === 'legacy-live') return postTradeAlert(client, store, leader, swap, tx, '⚠️ Legacy live mode is alerts-only in V5');
   if (leader.copySells === false) return postTradeAlert(client, store, leader, swap, tx, '🛡️ Copy sells disabled for this wallet; TP/SL strategy remains independent');
   const owned = store.data.paper.positions.find(p => p.mint === swap.mint && p.leaderAddress === leader.address && p.tokenAmount > 0);
   if (!owned) return postTradeAlert(client, store, leader, swap, tx, 'ℹ️ No paper position sourced from this leader; sell not copied');
@@ -273,15 +317,24 @@ async function pollPrices(client, store) {
     const hit = a.direction === 'above' ? p >= a.price : p <= a.price;
     if (!hit) continue;
     a.active = false; store.save();
-    let info = null; try { info = await getTokenInfo(a.mint); } catch {}
-    await ch.send(`🔔 **PRICE ALERT #${a.id}** — **${info?.symbol || short(a.mint)}** is $${fmt(p, 10)}, ${a.direction} your $${fmt(a.price, 10)} trigger.\nMint: \`${a.mint}\``);
+    const intel = await getTokenIntel(a.mint).catch(() => null);
+    await ch.send(`🔔 **PRICE ALERT #${a.id}** — **${intel?.symbol || short(a.mint)}** is $${fmt(p, 10)}, ${a.direction} your $${fmt(a.price, 10)} trigger.\nMint: \`${a.mint}\``);
   }
 }
 
 export function startMonitors(client, store) {
+  const realtime = startRealtimeWalletWake(store, ({ address, signature }) => {
+    const leader = store.data.leaders.find(l => l.address === address && l.enabled !== false);
+    if (!leader) return;
+    leader.nextPollAt = 0;
+    leader.lastRealtimeSignature = signature;
+    leader.lastRealtimeAt = Date.now();
+  });
+  startV5Discord(client, store, realtime.getStats);
+
   let walletBusy = false, priceBusy = false;
   setInterval(async () => {
-    if (walletBusy || store.data.settings.paused) return;
+    if (walletBusy || store.data.settings.paused || store.isReady?.() === false) return;
     const now = Date.now();
     const due = store.data.leaders.filter(l => l.enabled !== false && Number(l.nextPollAt || 0) <= now).sort((a, b) => Number(a.nextPollAt || 0) - Number(b.nextPollAt || 0));
     const leader = due[0]; if (!leader) return;
@@ -300,7 +353,7 @@ export function startMonitors(client, store) {
   }, config.walletSchedulerMs);
 
   setInterval(async () => {
-    if (priceBusy || store.data.settings.paused) return;
+    if (priceBusy || store.data.settings.paused || store.isReady?.() === false) return;
     priceBusy = true;
     try { await pollPrices(client, store); }
     catch (e) { console.error('Price poll:', e.message); }

@@ -27,20 +27,19 @@ export async function getTokenInfo(mint) {
   return rows.find(x => x.id === mint) || rows[0] || null;
 }
 
-export async function getOrder({ inputMint, outputMint, amountRaw, taker }) {
-  const params = new URLSearchParams({
-    inputMint,
-    outputMint,
-    amount: String(amountRaw),
-    taker,
-  });
+export async function getOrder({ inputMint, outputMint, amountRaw, taker, slippageBps = 0 }) {
+  const params = new URLSearchParams({ inputMint, outputMint, amount: String(amountRaw), taker });
+  if (Number(slippageBps || 0) > 0) params.set('slippageBps', String(Math.floor(Number(slippageBps))));
   const res = await fetch(`${BASE}/swap/v2/order?${params}`, { headers: headers() });
   if (!res.ok) throw new Error(`Jupiter order ${res.status}: ${await res.text()}`);
-  return res.json();
+  return { ...(await res.json()), quotedAtMs: Date.now() };
 }
 
-export async function executeOrder(order, wallet) {
+export async function executeOrder(order, wallet, maxQuoteAgeMs = 0) {
   if (!order?.transaction) throw new Error(order?.errorMessage || 'Jupiter returned no executable transaction');
+  if (Number(maxQuoteAgeMs || 0) > 0 && order.quotedAtMs && Date.now() - order.quotedAtMs > Number(maxQuoteAgeMs)) {
+    throw new Error(`Jupiter quote stale (${Date.now() - order.quotedAtMs}ms > ${maxQuoteAgeMs}ms)`);
+  }
   const tx = VersionedTransaction.deserialize(Buffer.from(order.transaction, 'base64'));
   tx.sign([wallet]);
   const signedTransaction = Buffer.from(tx.serialize()).toString('base64');
@@ -77,6 +76,36 @@ export async function estimateBuyQuality({ mint, solAmount, outAmountRaw, output
   };
 }
 
+async function freshBuyOrder({ mint, amountRaw, wallet, settings, info, solAmount }) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const order = await getOrder({
+        inputMint: WSOL,
+        outputMint: mint,
+        amountRaw,
+        taker: wallet.publicKey.toBase58(),
+        slippageBps: Number(settings.fixedSlippageBps || 0),
+      });
+      if (!order.transaction) throw new Error(order.errorMessage || 'No executable Jupiter route');
+      const q = await estimateBuyQuality({ mint, solAmount, outAmountRaw: order.outAmount, outputDecimals: info.decimals });
+      if (!q.ok) throw new Error(q.reason);
+      if (q.liquidityUsd < settings.minLiquidityUsd) throw new Error(`Liquidity $${Math.round(q.liquidityUsd).toLocaleString()} below minimum $${settings.minLiquidityUsd.toLocaleString()}`);
+      if (q.impactPct > settings.maxEstimatedImpactPct) throw new Error(`Estimated price impact ${q.impactPct.toFixed(2)}% above maximum ${settings.maxEstimatedImpactPct}%`);
+      const age = Date.now() - Number(order.quotedAtMs || Date.now());
+      if (Number(settings.maxQuoteAgeMs || 0) > 0 && age > Number(settings.maxQuoteAgeMs)) {
+        lastError = new Error(`Quote aged ${age}ms during validation; requoting`);
+        continue;
+      }
+      return { order, quality: q };
+    } catch (e) {
+      lastError = e;
+      if (!/stale|aged/i.test(String(e.message || e))) throw e;
+    }
+  }
+  throw lastError || new Error('Unable to obtain a fresh Jupiter quote');
+}
+
 export async function copyBuy({ mint, solAmount, wallet, settings }) {
   const amountSol = Math.min(solAmount, settings.maxTradeSol);
   const amountRaw = Math.floor(amountSol * LAMPORTS_PER_SOL);
@@ -85,20 +114,30 @@ export async function copyBuy({ mint, solAmount, wallet, settings }) {
   if (settings.minOrganicScore > 0 && Number(info.organicScore || 0) < settings.minOrganicScore) {
     throw new Error(`Organic score ${Number(info.organicScore || 0).toFixed(1)} below minimum ${settings.minOrganicScore}`);
   }
-  const order = await getOrder({ inputMint: WSOL, outputMint: mint, amountRaw, taker: wallet.publicKey.toBase58() });
-  if (!order.transaction) throw new Error(order.errorMessage || 'No executable Jupiter route');
-  const q = await estimateBuyQuality({ mint, solAmount: amountSol, outAmountRaw: order.outAmount, outputDecimals: info.decimals });
-  if (!q.ok) throw new Error(q.reason);
-  if (q.liquidityUsd < settings.minLiquidityUsd) throw new Error(`Liquidity $${Math.round(q.liquidityUsd).toLocaleString()} below minimum $${settings.minLiquidityUsd.toLocaleString()}`);
-  if (q.impactPct > settings.maxEstimatedImpactPct) throw new Error(`Estimated price impact ${q.impactPct.toFixed(2)}% above maximum ${settings.maxEstimatedImpactPct}%`);
-  const result = await executeOrder(order, wallet);
-  return { result, info, quality: q, solAmount: amountSol };
+  const { order, quality } = await freshBuyOrder({ mint, amountRaw, wallet, settings, info, solAmount: amountSol });
+  const result = await executeOrder(order, wallet, Number(settings.maxQuoteAgeMs || 0));
+  return { result, info, quality, solAmount: amountSol, router: order.router || null, orderMode: order.mode || null };
 }
 
-export async function copySell({ mint, rawAmount, wallet }) {
+export async function copySell({ mint, rawAmount, wallet, settings = {} }) {
   if (rawAmount <= 0n) throw new Error('Nothing to sell');
-  const order = await getOrder({ inputMint: mint, outputMint: WSOL, amountRaw: rawAmount.toString(), taker: wallet.publicKey.toBase58() });
+  let order = await getOrder({
+    inputMint: mint,
+    outputMint: WSOL,
+    amountRaw: rawAmount.toString(),
+    taker: wallet.publicKey.toBase58(),
+    slippageBps: Number(settings.fixedSlippageBps || 0),
+  });
   if (!order.transaction) throw new Error(order.errorMessage || 'No executable Jupiter sell route');
-  const result = await executeOrder(order, wallet);
-  return { result };
+  if (Number(settings.maxQuoteAgeMs || 0) > 0 && Date.now() - order.quotedAtMs > Number(settings.maxQuoteAgeMs)) {
+    order = await getOrder({
+      inputMint: mint,
+      outputMint: WSOL,
+      amountRaw: rawAmount.toString(),
+      taker: wallet.publicKey.toBase58(),
+      slippageBps: Number(settings.fixedSlippageBps || 0),
+    });
+  }
+  const result = await executeOrder(order, wallet, Number(settings.maxQuoteAgeMs || 0));
+  return { result, router: order.router || null, orderMode: order.mode || null };
 }
