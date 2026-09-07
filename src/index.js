@@ -2,7 +2,8 @@ import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
 import { PublicKey } from '@solana/web3.js';
 import { config } from './config.js';
 import { StateStore } from './state.js';
-import { getRecentTransactions, getHeliusStats } from './helius.js';
+import { getHeliusStats } from './helius.js';
+import { getLatestSignature } from './solana.js';
 import { startMonitors } from './monitor.js';
 import { analyzeWallet } from './analytics.js';
 import { paperPortfolio, resetPaper } from './paper.js';
@@ -53,7 +54,10 @@ async function addLeader(wallet, label, mode = 'paper', size = null, tier = 'B',
   if (!['paper', 'track'].includes(mode)) throw new Error('V3 supports TRACK or PAPER mode.');
   if (!['A', 'B', 'C'].includes(tier)) throw new Error('Tier must be A, B or C.');
   if (store.data.leaders.some(l => l.address === wallet)) throw new Error('That wallet is already being watched.');
-  const txs = await getRecentTransactions(wallet, 1, { fresh: true });
+
+  let latest = null;
+  try { latest = await getLatestSignature(wallet); } catch {}
+
   const leader = {
     address: wallet,
     label: label || `Trader ${wallet.slice(0, 4)}`,
@@ -62,8 +66,8 @@ async function addLeader(wallet, label, mode = 'paper', size = null, tier = 'B',
     copyBuySol: size || null,
     tier,
     weight: customWeight ?? tierWeight(tier),
-    lastSignature: txs[0]?.signature || null,
-    lastTimestamp: Number(txs[0]?.timestamp || 0),
+    lastSignature: latest?.signature || null,
+    lastTimestamp: Number(latest?.blockTime || 0),
     lastActivityAt: 0,
     nextPollAt: 0,
     pollErrors: 0,
@@ -132,10 +136,13 @@ function healthText() {
     `Helius cache hits: **${h.cacheHits}**`,
     `Helius 429s: **${h.rateLimited}**`,
     `Helius failures: **${h.failures}**`,
+    `Helius quota exhausted: **${h.quotaExhausted ? 'YES' : 'NO'}**`,
     `Helius cooldown: **${cooldown}**`,
     `Last Helius status: **${h.lastStatus || '—'}**`,
     `Wallet scheduler: **${config.walletSchedulerMs}ms**`,
     `Hot / idle poll: **${config.walletHotPollMs / 1000}s / ${config.walletIdlePollMs / 1000}s**`,
+    `Hot hold: **${Math.round(config.walletHotHoldMs / 1000)}s**`,
+    `Signature preflight: **enabled**`,
     `Wallets with poll errors: **${errorLeaders.length}**`,
     h.lastError ? `Last API error: \`${String(h.lastError).slice(0, 500)}\`` : 'Last API error: **none**',
   ].join('\n');
