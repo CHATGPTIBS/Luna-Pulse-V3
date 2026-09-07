@@ -1,34 +1,32 @@
 # V2 upgrade summary
 
 ## Added
-- `/dashboard` portfolio/status dashboard.
+- `/dashboard` paper portfolio/status dashboard.
 - `/positions` paper positions with unrealized PnL.
-- `/history` paper/live execution history.
+- `/history` paper-copy history.
 - `/wallet address:` and `/score` wallet copyability analysis.
-- `/copy add|remove|pause|resume|list` with per-wallet Track/Paper/Live modes.
-- Per-wallet copy buy size overrides.
+- `/copy add|remove|pause|resume|list` with per-wallet Track/Paper modes.
+- Per-wallet paper copy size overrides.
 - Paper portfolio with starting SOL, cash, equity, realized/unrealized PnL and reset support.
 - Mint blocklist.
 - Max market-cap, max-entry-delay and existing-position filters.
-- Live wallet SOL balance on dashboard.
-- Persistent V2 history/state migrations for V1 state files.
+- Persistent V2 history/state migration for V1 state files.
 
 ## Changed
 - Newly added wallets default to PAPER mode.
 - Legacy `/leader` adds a paper-mode wallet.
-- `/autocopy` is explicitly the global LIVE execution switch.
-- Alerts show configured wallet mode and rejection/copy outcome.
+- Existing legacy `live` wallets are treated as alerts-only by the V2 monitor.
+- Alerts show configured wallet mode and rejection/paper-copy outcome.
 
 ## Preserved
 - Helius wallet monitoring.
-- Jupiter token/price APIs and swap execution.
+- Jupiter token metadata and price APIs.
 - Price alerts.
-- Proportional leader sells.
-- Max trade, daily live spend, liquidity, organic-score and price-impact protections.
-- Environment-level live trading kill switch.
+- Proportional leader sell tracking for paper positions.
+- Max trade, liquidity and organic-score filters.
 
 ## Not yet implemented
-- Historical wallet PnL/win-rate reconstruction.
+- Historical wallet profitability/win-rate reconstruction.
 - Streaming/websocket wallet feed.
 - Automated stop-loss/take-profit exits.
 - PostgreSQL persistence.
