@@ -43,6 +43,6 @@ export async function analyzeWallet(address, limit = 100) {
     medianTradeSol: sizeMedian,
     newestAgeHours: Number.isFinite(ageHours) ? ageHours : null,
     recent: parsed.slice(0, 8).map(x => ({ side: x.swap.side, mint: x.swap.mint, solAmount: x.swap.solAmount, timestamp: x.tx.timestamp, signature: x.tx.signature })),
-    note: 'Luna Score V2 measures recent activity and copyability from parsed SOL↔token swaps. It is not a profitability or win-rate guarantee.',
+    note: 'Luna V3 score measures recent activity and how cleanly SOL↔token swaps can be followed. It is a copyability heuristic, not verified profitability or a win-rate guarantee.',
   };
 }
