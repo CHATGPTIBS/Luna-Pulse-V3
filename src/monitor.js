@@ -1,7 +1,7 @@
 import { EmbedBuilder } from 'discord.js';
 import { getRecentTransactions, isHeliusRateLimitError } from './helius.js';
 import { getPrices, getTokenInfo } from './jupiter.js';
-import { getTokenBalanceRaw } from './solana.js';
+import { getLatestSignature, getTokenBalanceRaw } from './solana.js';
 import { config } from './config.js';
 import { parseSwap, short, fmt } from './swap.js';
 import { paperBuy, paperSell } from './paper.js';
@@ -52,8 +52,9 @@ function pruneSignals(store) {
     for (const [address, row] of book.buyers) {
       if (row.at < participantCutoff) book.buyers.delete(address);
     }
-    const cooldownExpired = !book.firedAt || now - book.firedAt >= cooldownMs;
-    if (!book.buyers.size && cooldownExpired) signalBook.delete(mint);
+    const signalCooldownExpired = !book.firedAt || now - book.firedAt >= cooldownMs;
+    const paperCooldownExpired = !book.paperFiredAt || now - book.paperFiredAt >= cooldownMs;
+    if (!book.buyers.size && signalCooldownExpired && paperCooldownExpired) signalBook.delete(mint);
   }
 }
 
@@ -63,7 +64,7 @@ function recordBuySignal(store, leader, swap, tx) {
   const now = Date.now();
   let book = signalBook.get(swap.mint);
   if (!book) {
-    book = { mint: swap.mint, buyers: new Map(), firedAt: 0 };
+    book = { mint: swap.mint, buyers: new Map(), firedAt: 0, paperFiredAt: 0 };
     signalBook.set(swap.mint, book);
   }
 
@@ -98,6 +99,18 @@ function recordBuySignal(store, leader, swap, tx) {
   }
 
   return { walletCount, totalWeight, qualified, newlyQualified, participants };
+}
+
+function paperCooldownAvailable(store, mint) {
+  const book = signalBook.get(mint);
+  if (!book?.paperFiredAt) return true;
+  const cooldownMs = Math.max(0, Number(store.data.settings.signalCooldownSec || 0)) * 1000;
+  return Date.now() - book.paperFiredAt >= cooldownMs;
+}
+
+function markPaperFired(mint) {
+  const book = signalBook.get(mint);
+  if (book) book.paperFiredAt = Date.now();
 }
 
 async function buyGate({ store, leader, swap, tx }) {
@@ -187,13 +200,13 @@ async function handleBuy(client, store, leader, swap, tx) {
     return postTradeAlert(client, store, leader, swap, tx, `⏳ Waiting for ${s.signalMinWallets} wallet(s) / ${Number(s.signalMinWeight).toFixed(2)} weight`, null, signal);
   }
 
-  if (!signal.newlyQualified) {
-    return postTradeAlert(client, store, leader, swap, tx, `🛡️ Signal already fired; ${s.signalCooldownSec}s duplicate cooldown active`, null, signal);
-  }
-
   const executionLeader = bestPaperLeader(store, signal.participants);
   if (!executionLeader) {
-    return postTradeAlert(client, store, leader, swap, tx, '👀 Signal qualified, but participating wallets are TRACK-only', null, signal);
+    return postTradeAlert(client, store, leader, swap, tx, signal.newlyQualified ? '👀 Signal qualified, but participating wallets are TRACK-only' : '👀 Qualified TRACK-only signal remains inside cooldown', null, signal);
+  }
+
+  if (!paperCooldownAvailable(store, swap.mint)) {
+    return postTradeAlert(client, store, leader, swap, tx, `🛡️ Paper signal already executed; ${s.signalCooldownSec}s duplicate cooldown active`, null, signal);
   }
 
   const gate = await buyGate({ store, leader: executionLeader, swap, tx });
@@ -209,6 +222,7 @@ async function handleBuy(client, store, leader, swap, tx) {
       leaderLabel: executionLeader.label,
       signature: tx.signature,
     });
+    markPaperFired(swap.mint);
     store.resetDailyIfNeeded();
     store.data.daily.boughtSol += r.solAmount;
     store.save();
@@ -246,6 +260,23 @@ async function handleSell(client, store, leader, swap, tx) {
 }
 
 async function pollLeader(client, store, leader) {
+  // Cheap preflight: if the latest signature has not changed, there is no
+  // reason to spend a Helius enhanced-transaction request on this wallet.
+  let latest = null;
+  try {
+    latest = await getLatestSignature(leader.address);
+  } catch (e) {
+    // Fail open: a public/dedicated RPC outage must not stop monitoring.
+    console.warn(`Signature preflight ${short(leader.address)}:`, e.message);
+  }
+
+  if (latest && leader.lastSignature && latest.signature === leader.lastSignature) return 0;
+  if (latest && !leader.lastSignature) {
+    leader.lastSignature = latest.signature;
+    leader.lastTimestamp = Number(latest.blockTime || 0);
+    return 0;
+  }
+
   const txs = await getRecentTransactions(leader.address, config.recentTxLimit, { fresh: true });
   if (!txs.length) return 0;
 
