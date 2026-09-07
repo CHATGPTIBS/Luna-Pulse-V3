@@ -52,19 +52,21 @@ function tierWeight(tier) {
   return 1;
 }
 
-function normalizeLeader(l) {
-  const tier = ['A', 'B', 'C'].includes(l?.tier) ? l.tier : 'B';
+function normalizeLeader(l = {}) {
+  const tier = ['A', 'B', 'C'].includes(l.tier) ? l.tier : 'B';
+  const parsedWeight = Number(l.weight);
   return {
-    enabled: true,
-    copyMode: 'paper',
-    copyBuySol: null,
-    tier,
-    weight: Number.isFinite(Number(l?.weight)) ? Number(l.weight) : tierWeight(tier),
-    lastSignature: null,
-    lastActivityAt: 0,
-    nextPollAt: 0,
-    pollErrors: 0,
     ...l,
+    enabled: l.enabled !== false,
+    copyMode: ['paper', 'track'].includes(l.copyMode) ? l.copyMode : 'paper',
+    copyBuySol: l.copyBuySol ?? null,
+    tier,
+    weight: Number.isFinite(parsedWeight) && parsedWeight > 0 ? parsedWeight : tierWeight(tier),
+    lastSignature: l.lastSignature || null,
+    lastTimestamp: Number(l.lastTimestamp || 0),
+    lastActivityAt: Number(l.lastActivityAt || 0),
+    nextPollAt: Number(l.nextPollAt || 0),
+    pollErrors: Number(l.pollErrors || 0),
   };
 }
 
