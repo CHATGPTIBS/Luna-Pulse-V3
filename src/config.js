@@ -18,6 +18,10 @@ export const config = {
   heliusApiKey: process.env.HELIUS_API_KEY,
   jupiterApiKey: process.env.JUPITER_API_KEY,
 
+  // V3 uses a lightweight signature check before spending a Helius enhanced
+  // transaction request. Override this if you have another reliable RPC.
+  signatureRpcUrl: process.env.SOLANA_SIGNATURE_RPC_URL || 'https://api.mainnet-beta.solana.com',
+
   // Live execution stays opt-in. V3 is paper-first by design.
   liveTradingEnabled: String(process.env.ENABLE_LIVE_TRADING).toLowerCase() === 'true',
   privateKey: process.env.BS58_PRIVATE_KEY || '',
