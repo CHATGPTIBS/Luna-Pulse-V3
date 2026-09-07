@@ -11,6 +11,7 @@ const stats = {
   cacheHits: 0,
   rateLimited: 0,
   failures: 0,
+  quotaExhausted: false,
   lastStatus: 0,
   lastError: null,
   lastRequestAt: 0,
@@ -25,17 +26,18 @@ function retryAfterMs(res, attempt) {
   return Math.min(config.heliusBackoffMaxMs, config.heliusBackoffBaseMs * (2 ** attempt));
 }
 
-function cooldownError() {
+function cooldownError(message = 'Helius cooling down after rate limit') {
   const seconds = Math.max(1, Math.ceil((backoffUntil - Date.now()) / 1000));
-  const e = new Error(`Helius cooling down after rate limit (${seconds}s remaining)`);
+  const e = new Error(`${message} (${seconds}s remaining)`);
   e.status = 429;
   e.retryAfterMs = Math.max(0, backoffUntil - Date.now());
+  e.quotaExhausted = stats.quotaExhausted;
   return e;
 }
 
 async function requestJson(url) {
   const run = async () => {
-    if (Date.now() < backoffUntil) throw cooldownError();
+    if (Date.now() < backoffUntil) throw cooldownError(stats.quotaExhausted ? 'Helius quota exhausted; cooldown active' : undefined);
 
     const wait = Math.max(0, nextAllowedAt - Date.now());
     if (wait) await sleep(wait);
@@ -58,16 +60,25 @@ async function requestJson(url) {
       stats.lastStatus = res.status;
       if (res.ok) {
         stats.lastError = null;
+        stats.quotaExhausted = false;
         return res.json();
       }
 
       const body = await res.text();
       if (res.status === 429) {
         stats.rateLimited++;
-        const retryMs = retryAfterMs(res, attempt);
+        const quotaExhausted = /max usage reached|usage limit|quota.*exhaust|credits.*exhaust/i.test(body);
+        stats.quotaExhausted = quotaExhausted;
+        const retryMs = quotaExhausted ? config.heliusBackoffMaxMs : retryAfterMs(res, attempt);
         backoffUntil = Date.now() + retryMs;
         stats.backoffUntil = backoffUntil;
         stats.lastError = `Helius 429: ${body.slice(0, 250)}`;
+
+        // Monthly/project quota exhaustion will not recover from an immediate
+        // retry, so do not create a retry storm. Let the monitor cool down and
+        // surface the state through /health.
+        if (quotaExhausted) throw cooldownError('Helius max usage reached');
+
         if (attempt < config.heliusMaxRetries) {
           await sleep(retryMs);
           backoffUntil = 0;
@@ -118,5 +129,5 @@ export function getHeliusStats() {
 }
 
 export function isHeliusRateLimitError(error) {
-  return Number(error?.status) === 429 || /Helius.*429|rate limit|cooling down/i.test(String(error?.message || error));
+  return Number(error?.status) === 429 || /Helius.*429|rate limit|cooling down|max usage/i.test(String(error?.message || error));
 }
