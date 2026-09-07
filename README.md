@@ -1,60 +1,61 @@
-# Luna Meme Bot V4 — Solana Discord Trading + Smart-Money Toolkit
+# Luna Meme Bot V5 — Alpha Engine
 
-Luna V4 builds on the V3 adaptive wallet signal engine with a Discord-native feature set inspired by the useful parts of Trojan and GMGN: instant swaps, advanced orders, DCA, TP/SL/trailing exits, token discovery/security intelligence, wallet PnL estimates, richer copy-trade controls, watchlists and a launch-profile autosniper.
+Luna V5 keeps the V4 Trojan/GMGN-style Discord toolkit and upgrades the parts that matter most for copy-trading quality: realtime wallet wakeups, entry-chase protection, a 100-point Alpha score, position-aware exits, smarter token discovery, stronger token-risk data, tracked-wallet ranking, quote freshness protection, and optional durable Postgres state.
 
-## V4 feature map
+## What changed in V5
 
-### Trading
-- `/buy` — immediate PAPER buy or explicitly enabled LIVE Jupiter swap.
-- `/sell` — immediate percentage sell.
-- `/limit` — price- or market-cap-triggered buy/sell orders.
-- `/dca` — repeated buy/sell executions by interval and run count.
-- `/autosell` — OCO-style take-profit / stop-loss / trailing-stop group.
-- `/orders` and `/cancelorder` — inspect/cancel open strategies.
+### Realtime smart-money detection
+- Standard Solana/Helius WebSocket `logsSubscribe` subscriptions wake tracked wallets as soon as activity appears.
+- Adaptive Helius transaction polling remains the authoritative parser and fallback if the stream disconnects or misses an event.
+- `/stream` shows connection, subscription, notification and persistence status.
 
-### Discovery / token intelligence
-- `/token` — Jupiter + DexScreener market data and RugCheck risk signals.
-- `/discover` — live Solana radar from DexScreener boost/activity data.
-- `/watch add|remove|list` — token watchlist.
-- `/sniper` — launch-profile scanner that reacts to newly seen Solana token profiles and applies liquidity / market-cap / blocklist / rugged filters.
+### Luna Alpha score
+Every qualified copied buy can be scored from 0–100 across:
+- **Smart money — 30:** wallet count and combined signal weight.
+- **Token safety — 25:** RugCheck risks, holder concentration when available, creator holdings, authorities and liquidity.
+- **Live flow — 20:** buy/sell flow, turnover and momentum quality.
+- **Entry quality — 15:** how far current price has moved from the source wallet's implied entry.
+- **Execution quality — 10:** liquidity and proposed trade-size/liquidity ratio.
 
-**Sniper scope:** V4's sniper is a launch-profile autosniper. It is not advertised as a first-block/Jito sniper; that class of execution needs specialized low-latency broadcast infrastructure.
+Default paper-copy protection:
+- maximum chase: **12%** above source entry
+- minimum Alpha: **60/100**
 
-### Smart money / copy trading
-V3 weighted consensus remains intact and gains per-wallet controls through `/copy add` and `/copy edit`:
-- TRACK or PAPER mode
-- A/B/C tier and custom signal weight
-- fixed copied SOL size or percentage of leader buy size
-- mirror sells on/off
-- duplicate buys on/off
-- wallet-specific minimum leader buy
-- wallet-specific minimum liquidity / min market cap / max market cap
-- automatic copied-position take-profit / stop-loss / trailing stop
+Use `/v5risk` to adjust those values. `/alpha <mint>` gives a standalone token Alpha report.
 
-Use `/wallet` for copyability and `/walletpnl` for an observed-window realized-PnL/win-rate estimate. The PnL command is explicitly an estimate from recent parseable swaps, not a complete tax-lot or all-time ledger.
+### Position-aware exit ladders
+V4 cancelled all sibling TP/SL/trailing orders when any one sibling filled. V5 only cancels the remaining protective siblings when the position is actually closed. A partial take-profit therefore leaves the unsold position protected.
 
-## Live-trading safety model
+Use `/ladder` for two take-profit levels plus a 100% stop-loss and/or trailing stop. TP percentages are percentages of the **remaining** position at the time each level executes.
 
-V4 defaults to PAPER.
+### Smarter discovery and token intelligence
+- `/discover` now ranks candidates by liquidity, turnover, buyer/seller flow, momentum quality and age instead of treating paid boost activity as alpha.
+- `/alpha` and `/token` use expanded RugCheck/Jupiter/DexScreener data.
+- High-severity launch risks are filtered from the V5 launch-profile sniper.
 
-Manual live swaps require both a key and this explicit switch:
+### Smart Wallet Radar
+`/radar` ranks the wallets you already track using observed PnL, win rate, copyability, recency, trade behavior and hold time. Very short-hold sniper-like wallets are penalized because they are often poor copy targets even if their headline PnL looks strong.
+
+### Jupiter execution protection
+V5 keeps Jupiter Swap V2 `/order` + `/execute`, so the default live path retains Jupiter-managed RTSE slippage, priority-fee strategy and transaction landing. V5 adds:
+- stale-quote detection and automatic requote
+- configurable maximum quote age
+- optional fixed `slippageBps`; `0` keeps Jupiter RTSE
+
+### Durable state
+V5 still supports `data/state.json` with atomic local writes. If `DATABASE_URL` is configured, it automatically creates/uses a `luna_state` Postgres table and mirrors the complete state there. On a fresh container it can hydrate from Postgres before the live loops proceed.
+
+## V5 commands
 
 ```text
-ENABLE_LIVE_TRADING=true
-BS58_PRIVATE_KEY=...
+/alpha <mint>             Token Alpha score
+/radar                     Rank tracked wallets
+/v5risk                    Chase / Alpha / quote-age / slippage controls
+/ladder                    Position-aware TP/SL/trailing ladder
+/stream                    Realtime + persistence status
 ```
 
-Unattended LIVE limit orders, DCA, TP/SL/trailing orders, and the launch-profile sniper require a **second** switch:
-
-```text
-ENABLE_LIVE_AUTOMATION=true
-```
-
-If only `ENABLE_LIVE_TRADING=true` is set, manual live `/buy` and `/sell` can execute but automated LIVE strategies remain blocked.
-
-Never commit private keys or `.env` files.
-
-## Main commands
+All V4 commands remain available:
 
 ```text
 /dashboard /health /status
@@ -82,65 +83,56 @@ HELIUS_API_KEY
 JUPITER_API_KEY
 ```
 
-Optional:
+Recommended V5 settings:
 
 ```text
-DISCORD_GUILD_ID
-SOLANA_SIGNATURE_RPC_URL=https://api.mainnet-beta.solana.com
-
-WALLET_SCHEDULER_MS=2000
+REALTIME_WALLET_STREAM=true
+SOLANA_WS_URL=
+WALLET_SCHEDULER_MS=1000
 WALLET_HOT_POLL_MS=15000
-WALLET_HOT_HOLD_MS=300000
 WALLET_IDLE_POLL_MS=60000
-PRICE_POLL_MS=30000
-HELIUS_TX_LIMIT=20
+STRATEGY_POLL_MS=2000
 
-STRATEGY_POLL_MS=3000
-LAUNCH_POLL_MS=10000
+# Optional durable state
+DATABASE_URL=
+DATABASE_SSL=false
+```
 
-HELIUS_MIN_INTERVAL_MS=250
-HELIUS_CACHE_MS=2000
-HELIUS_MAX_RETRIES=2
-HELIUS_BACKOFF_BASE_MS=30000
-HELIUS_BACKOFF_MAX_MS=900000
+Live money remains separately opt-in:
 
+```text
 ENABLE_LIVE_TRADING=false
 ENABLE_LIVE_AUTOMATION=false
 BS58_PRIVATE_KEY=
 ```
 
-## Deploy / update Discord commands
+`ENABLE_LIVE_TRADING=true` unlocks manual live swaps. Unattended LIVE limit/DCA/TP-SL/sniper execution additionally requires `ENABLE_LIVE_AUTOMATION=true`.
 
-The existing Render worker can continue to use Node 20 and `npm start`.
-
-After deploying V4, register the changed slash commands once:
+## Deploy
 
 ```bash
 npm install
 npm run check
-npm run deploy-commands
+npm start
 ```
 
-Then in Discord run:
+`npm start` registers the complete V4+V5 Discord command set before starting the bot.
 
-1. `/setchannel`
-2. `/health`
-3. `/dashboard`
-4. Test `/buy ... mode:Paper`
-5. Test `/limit`, `/dca` and `/autosell` in PAPER mode
-6. Add smart wallets with `/copy add`
-7. Configure `/signal` and `/risk`
-8. Only enable live environment switches after paper testing
+## Recommended rollout
 
-## Persistence
+1. Keep `ENABLE_LIVE_TRADING=false` and `ENABLE_LIVE_AUTOMATION=false`.
+2. Run `/stream` and confirm the realtime accelerator is connected.
+3. Run `/radar` on tracked wallets and remove obvious sniper-like/weak sources.
+4. Paper-copy with the default 12% chase and 60 Alpha gates.
+5. Use `/ladder` to test partial-profit behavior.
+6. Review `/history`, `/signals` and paper PnL before loosening/tightening `/v5risk`.
+7. Add Postgres before relying on unattended strategies across Render redeploys.
+8. Only then consider enabling live switches.
 
-State remains in `data/state.json`. V3 state migrates automatically to schema V4 and retains leaders, paper portfolio, signal history, trade history and blocklist. V4 adds orders, snipers and watchlist state.
+## Caveats
 
-Use a persistent Render disk or database if state must survive every redeploy/restart.
-
-## Data caveats
-
-- DexScreener discovery/boost data measures current activity; it is not a recommendation or proof of organic demand.
-- RugCheck/Jupiter/token metadata are risk signals and can be incomplete or unavailable.
-- Wallet PnL is estimated from the sampled parseable transactions and can miss earlier cost basis, transfers or unparsed routes.
-- Paper results do not reproduce real slippage, failed transactions, MEV, latency or rapidly changing liquidity.
+- Alpha is a heuristic, not a guarantee of profit.
+- Wallet PnL is estimated from a recent parseable window and can miss transfers, earlier cost basis and unsupported routes.
+- RugCheck/Jupiter/DexScreener data can be incomplete or temporarily unavailable.
+- The launch-profile sniper is not a first-block/Jito sniper.
+- Paper results do not reproduce live slippage, failed transactions, MEV, latency or rapidly changing liquidity.
