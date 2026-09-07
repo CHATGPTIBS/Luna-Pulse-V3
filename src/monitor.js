@@ -10,7 +10,6 @@ const signalBook = new Map();
 const tokenCache = new Map();
 
 function explorerTx(sig) { return `https://solscan.io/tx/${sig}`; }
-function dex(mint) { return `https://dexscreener.com/solana/${mint}`; }
 function leaderMode(leader) { return leader.copyMode === 'track' ? 'track' : leader.copyMode === 'paper' ? 'paper' : 'legacy-live'; }
 function tierWeight(tier) { return tier === 'A' ? 1.5 : tier === 'C' ? 0.75 : 1; }
 function weightOf(leader) { const n = Number(leader.weight); return Number.isFinite(n) && n > 0 ? n : tierWeight(leader.tier); }
@@ -44,10 +43,17 @@ async function tokenSnapshot(mint) {
 }
 
 function pruneSignals(store) {
-  const cutoff = Date.now() - Math.max(30, Number(store.data.settings.signalWindowSec || 120)) * 1000;
+  const now = Date.now();
+  const windowMs = Math.max(30, Number(store.data.settings.signalWindowSec || 120)) * 1000;
+  const cooldownMs = Math.max(0, Number(store.data.settings.signalCooldownSec || 0)) * 1000;
+  const participantCutoff = now - windowMs;
+
   for (const [mint, book] of signalBook) {
-    for (const [address, row] of book.buyers) if (row.at < cutoff) book.buyers.delete(address);
-    if (!book.buyers.size && (!book.firedAt || book.firedAt < cutoff)) signalBook.delete(mint);
+    for (const [address, row] of book.buyers) {
+      if (row.at < participantCutoff) book.buyers.delete(address);
+    }
+    const cooldownExpired = !book.firedAt || now - book.firedAt >= cooldownMs;
+    if (!book.buyers.size && cooldownExpired) signalBook.delete(mint);
   }
 }
 
@@ -287,7 +293,7 @@ async function pollPrices(client, store) {
     a.active = false;
     store.save();
     let info = null; try { info = await getTokenInfo(a.mint); } catch {}
-    await ch.send(`🔔 **PRICE ALERT #${a.id}** — **${info?.symbol || short(a.mint)}** is $${fmt(p, 10)}, ${a.direction} your $${fmt(a.price, 10)} trigger.\nMint: \`${a.mint}\`\n${dex(a.mint)}`);
+    await ch.send(`🔔 **PRICE ALERT #${a.id}** — **${info?.symbol || short(a.mint)}** is $${fmt(p, 10)}, ${a.direction} your $${fmt(a.price, 10)} trigger.\nMint: \`${a.mint}\``);
   }
 }
 
@@ -310,7 +316,8 @@ export function startMonitors(client, store) {
     try {
       const activity = await pollLeader(client, store, leader);
       leader.pollErrors = 0;
-      leader.nextPollAt = Date.now() + (activity ? config.walletHotPollMs : config.walletIdlePollMs);
+      const recentlyActive = activity > 0 || (Number(leader.lastActivityAt || 0) > 0 && Date.now() - Number(leader.lastActivityAt) < config.walletHotHoldMs);
+      leader.nextPollAt = Date.now() + (recentlyActive ? config.walletHotPollMs : config.walletIdlePollMs);
     } catch (e) {
       leader.pollErrors = Number(leader.pollErrors || 0) + 1;
       const rateLimited = isHeliusRateLimitError(e);
