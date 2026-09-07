@@ -6,18 +6,21 @@ Luna V3 turns the V2 wallet watcher into an adaptive, paper-first Solana trading
 
 ### Helius usage protection
 
-V2 polled every wallet every few seconds. V3 uses one adaptive scheduler:
+V2 polled every wallet every few seconds and spent a Helius enhanced-transaction request even when the wallet had done nothing. V3 uses signature-first adaptive monitoring:
 
-- active wallets use the **hot** interval
+- each due wallet first gets a lightweight latest-signature check through a Solana RPC
+- if the signature is unchanged, **no Helius enhanced-transaction request is made**
+- Helius enhanced transactions are fetched when the wallet actually changes, or as a fail-open fallback if the signature RPC is unavailable
+- recently active wallets use the **hot** interval for a configurable hold period
 - idle wallets use the **idle** interval
-- only one due wallet is polled per scheduler tick
-- all Helius calls pass through a central request queue
-- short-lived responses are cached
+- only one due wallet is processed per scheduler tick
+- all Helius enhanced calls pass through a central request queue
+- short-lived Helius responses are cached
 - HTTP 429 responses honor cooldown/backoff
 - `max usage reached` is treated as quota exhaustion and does **not** create a retry storm
-- `/health` shows requests, cache hits, 429s, failures and cooldown state
+- `/health` shows requests, cache hits, 429s, quota exhaustion, failures and cooldown state
 
-The defaults are intentionally conservative enough to make multi-wallet tracking far less wasteful than V2.
+This is designed to reduce idle-wallet Helius consumption dramatically compared with V2 while still allowing faster checks after activity.
 
 ### Weighted smart-money signals
 
@@ -32,7 +35,7 @@ A BUY can qualify when both configured conditions are met inside the signal wind
 1. minimum number of distinct wallets
 2. minimum combined wallet weight
 
-The bot also supports a minimum leader buy size and a duplicate-signal cooldown.
+The bot also supports a minimum leader buy size and a duplicate-signal cooldown. Signal-alert cooldown and paper-execution cooldown are tracked separately, so a TRACK-only consensus cannot prevent a later participating PAPER wallet from becoming the execution source.
 
 Example stricter consensus setup:
 
@@ -56,7 +59,7 @@ Existing legacy live-mode wallets are not used for automatic V3 execution.
 ## Main commands
 
 - `/dashboard` — equity, PnL, win rate, positions, wallet count, daily exposure, signal count and Helius status.
-- `/health` — API/monitor health, Helius request count, 429 count and cooldown state.
+- `/health` — API/monitor health, Helius request count, 429 count, quota/cooldown state and monitoring cadence.
 - `/signals` — recent qualified smart-money signals.
 - `/wallet address:<wallet>` — inspect wallet activity/copyability.
 - `/score wallet:<wallet>` — calculate the Luna wallet score.
@@ -106,11 +109,20 @@ Optional Discord setting:
 DISCORD_GUILD_ID
 ```
 
+Signature preflight default:
+
+```text
+SOLANA_SIGNATURE_RPC_URL=https://api.mainnet-beta.solana.com
+```
+
+For production, you can point this at a reliable dedicated Solana RPC. It is used only to cheaply detect whether a tracked wallet's latest signature changed before V3 requests Helius enhanced transaction data.
+
 Adaptive monitoring defaults:
 
 ```text
 WALLET_SCHEDULER_MS=2000
 WALLET_HOT_POLL_MS=15000
+WALLET_HOT_HOLD_MS=300000
 WALLET_IDLE_POLL_MS=60000
 PRICE_POLL_MS=30000
 HELIUS_TX_LIMIT=20
