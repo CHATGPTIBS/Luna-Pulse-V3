@@ -8,9 +8,14 @@ const defaults = {
   leaders: [],
   priceAlerts: [],
   nextPriceAlertId: 1,
+  nextTradeId: 1,
+  tradeHistory: [],
+  blockedMints: [],
+  paper: { startingSol: 10, cashSol: 10, realizedPnlSol: 0, positions: [] },
   settings: {
     alertChannelId: null,
     autocopy: false,
+    paperTrading: true,
     paused: false,
     buyAlerts: true,
     sellAlerts: true,
@@ -18,14 +23,26 @@ const defaults = {
     maxTradeSol: 0.10,
     maxDailyBuySol: 0.30,
     minLiquidityUsd: 25000,
+    maxMarketCapUsd: 0,
     minOrganicScore: 0,
     maxEstimatedImpactPct: 8,
+    maxEntryDelaySec: 45,
+    skipExistingPosition: true,
     sellMode: 'proportional'
   },
   daily: { date: '', boughtSol: 0 }
 };
 
 function clone(v) { return JSON.parse(JSON.stringify(v)); }
+
+function normalizeLeader(l) {
+  return {
+    enabled: true,
+    copyMode: 'paper',
+    copyBuySol: null,
+    ...l,
+  };
+}
 
 export class StateStore {
   constructor() {
@@ -40,8 +57,12 @@ export class StateStore {
       return {
         ...clone(defaults),
         ...parsed,
+        leaders: (parsed.leaders || []).map(normalizeLeader),
         settings: { ...defaults.settings, ...(parsed.settings || {}) },
         daily: { ...defaults.daily, ...(parsed.daily || {}) },
+        paper: { ...defaults.paper, ...(parsed.paper || {}), positions: parsed.paper?.positions || [] },
+        tradeHistory: parsed.tradeHistory || [],
+        blockedMints: parsed.blockedMints || [],
       };
     } catch {
       return clone(defaults);
