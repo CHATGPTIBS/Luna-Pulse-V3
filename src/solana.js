@@ -1,7 +1,11 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-import { config } from './config.js';
+import { config, LAMPORTS_PER_SOL } from './config.js';
 
 export const connection = new Connection(`https://mainnet.helius-rpc.com/?api-key=${config.heliusApiKey}`, 'confirmed');
+
+export async function getSolBalance(owner) {
+  return (await connection.getBalance(new PublicKey(owner), 'confirmed')) / LAMPORTS_PER_SOL;
+}
 
 export async function getTokenBalanceRaw(owner, mint) {
   const ownerPk = new PublicKey(owner);
