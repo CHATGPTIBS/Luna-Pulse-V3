@@ -17,18 +17,15 @@ export const config = {
   adminUserId: process.env.ADMIN_USER_ID,
   heliusApiKey: process.env.HELIUS_API_KEY,
   jupiterApiKey: process.env.JUPITER_API_KEY,
-
-  // V3 uses a lightweight signature check before spending a Helius enhanced
-  // transaction request. Override this if you have another reliable RPC.
   signatureRpcUrl: process.env.SOLANA_SIGNATURE_RPC_URL || 'https://api.mainnet-beta.solana.com',
 
-  // Live execution stays opt-in. V3 is paper-first by design.
+  // Live money always requires the first switch. Unattended V4 strategies
+  // require the second switch as well, so enabling manual live swaps does not
+  // silently enable limit/DCA/sniper execution.
   liveTradingEnabled: String(process.env.ENABLE_LIVE_TRADING).toLowerCase() === 'true',
+  liveAutomationEnabled: String(process.env.ENABLE_LIVE_AUTOMATION).toLowerCase() === 'true',
   privateKey: process.env.BS58_PRIVATE_KEY || '',
 
-  // V3 monitoring: the scheduler ticks often, but each wallet has its own
-  // adaptive next-poll time. This prevents N wallets from causing N requests
-  // every few seconds.
   walletSchedulerMs: numberEnv('WALLET_SCHEDULER_MS', 2000, 1000),
   walletHotPollMs: numberEnv('WALLET_HOT_POLL_MS', 15000, 5000),
   walletHotHoldMs: numberEnv('WALLET_HOT_HOLD_MS', 300000, 30000),
@@ -36,7 +33,11 @@ export const config = {
   pricePollMs: numberEnv('PRICE_POLL_MS', 30000, 10000),
   recentTxLimit: Math.floor(numberEnv('HELIUS_TX_LIMIT', 20, 5)),
 
-  // Central Helius rate limiter / 429 protection.
+  // V4 strategy/discovery cadence. DexScreener's public limits are respected by
+  // caching in market.js; launch scans default to 10 seconds.
+  strategyPollMs: numberEnv('STRATEGY_POLL_MS', 3000, 1000),
+  launchPollMs: numberEnv('LAUNCH_POLL_MS', 10000, 5000),
+
   heliusMinIntervalMs: numberEnv('HELIUS_MIN_INTERVAL_MS', 250, 100),
   heliusCacheMs: numberEnv('HELIUS_CACHE_MS', 2000, 0),
   heliusMaxRetries: Math.floor(numberEnv('HELIUS_MAX_RETRIES', 2, 0)),
