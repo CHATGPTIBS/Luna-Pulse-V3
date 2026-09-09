@@ -1,6 +1,9 @@
 import 'dotenv/config';
 
-const required = ['DISCORD_TOKEN', 'DISCORD_CLIENT_ID', 'ADMIN_USER_ID', 'HELIUS_API_KEY', 'JUPITER_API_KEY'];
+// Web-first runtime requires only the chain/data providers. Discord variables
+// remain supported by the legacy Discord entrypoint but are no longer needed
+// to boot the Luna Terminal web app.
+const required = ['HELIUS_API_KEY', 'JUPITER_API_KEY'];
 for (const key of required) {
   if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
 }
@@ -11,10 +14,10 @@ function numberEnv(name, fallback, min = 0) {
 }
 
 export const config = {
-  discordToken: process.env.DISCORD_TOKEN,
-  clientId: process.env.DISCORD_CLIENT_ID,
+  discordToken: process.env.DISCORD_TOKEN || '',
+  clientId: process.env.DISCORD_CLIENT_ID || '',
   guildId: process.env.DISCORD_GUILD_ID || null,
-  adminUserId: process.env.ADMIN_USER_ID,
+  adminUserId: process.env.ADMIN_USER_ID || '',
   heliusApiKey: process.env.HELIUS_API_KEY,
   jupiterApiKey: process.env.JUPITER_API_KEY,
   signatureRpcUrl: process.env.SOLANA_SIGNATURE_RPC_URL || 'https://api.mainnet-beta.solana.com',
