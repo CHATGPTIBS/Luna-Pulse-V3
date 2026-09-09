@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#090b10" />
+  <title>Luna Terminal</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="authGate" class="auth-gate">
+    <div class="auth-card">
+      <div class="brand-mark">L</div>
+      <div>
+        <div class="eyebrow">PRIVATE SOLANA TERMINAL</div>
+        <h1>Luna Terminal</h1>
+        <p>Enter the dashboard access key configured as <code>WEB_ADMIN_TOKEN</code>.</p>
+      </div>
+      <form id="authForm" class="auth-form">
+        <label>Access key</label>
+        <input id="authToken" type="password" autocomplete="current-password" placeholder="••••••••••••••••" />
+        <button class="btn primary wide" type="submit">Unlock terminal</button>
+      </form>
+      <div id="authError" class="error-text"></div>
+    </div>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="logo-row">
+        <div class="brand-mark small">L</div>
+        <div>
+          <strong>LUNA</strong>
+          <span>TERMINAL</span>
+        </div>
+      </div>
+
+      <nav id="nav">
+        <button class="nav-item active" data-view="dashboard"><span>◫</span> Overview</button>
+        <button class="nav-item" data-view="discover"><span>⌁</span> Discover</button>
+        <button class="nav-item" data-view="trade"><span>↗</span> Trade</button>
+        <button class="nav-item" data-view="copy"><span>◎</span> Copy Trade</button>
+        <button class="nav-item" data-view="wallet"><span>◉</span> Wallet Intel</button>
+        <button class="nav-item" data-view="positions"><span>▦</span> Positions</button>
+        <button class="nav-item" data-view="orders"><span>≡</span> Orders</button>
+        <button class="nav-item" data-view="sniper"><span>⌖</span> Sniper</button>
+        <button class="nav-item" data-view="history"><span>↺</span> History</button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="engine-row"><span id="engineDot" class="status-dot"></span><div><b id="engineLabel">Connecting</b><small id="engineSub">—</small></div></div>
+        <button id="lockBtn" class="text-btn">Lock terminal</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="mobile-brand">
+          <div class="brand-mark tiny">L</div><strong>Luna</strong>
+        </div>
+        <form id="globalSearch" class="global-search">
+          <span>⌕</span>
+          <input id="globalSearchInput" autocomplete="off" placeholder="Paste token CA or wallet address" />
+          <kbd>Enter</kbd>
+        </form>
+        <div class="top-actions">
+          <button id="refreshBtn" class="icon-btn" title="Refresh">↻</button>
+          <button id="pauseBtn" class="mode-chip">Engine: <b id="pauseText">—</b></button>
+          <div id="modeSwitch" class="segmented compact">
+            <button data-mode="paper" class="active">Paper</button>
+            <button data-mode="live">Live</button>
+          </div>
+        </div>
+      </header>
+
+      <section id="view-dashboard" class="view active">
+        <div class="hero-line">
+          <div>
+            <div class="eyebrow">SOLANA EXECUTION + SMART MONEY</div>
+            <h2>Trading cockpit</h2>
+            <p>Fast execution controls, wallet intelligence and automation in one terminal.</p>
+          </div>
+          <div class="hero-actions">
+            <button class="btn ghost" data-jump="wallet">Analyze wallet</button>
+            <button class="btn primary" data-jump="trade">Open trade panel</button>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <article class="stat-card"><span>Paper equity</span><strong id="statEquity">—</strong><small id="statPnl">—</small></article>
+          <article class="stat-card"><span>Observed win rate</span><strong id="statWinRate">—</strong><small id="statWins">—</small></article>
+          <article class="stat-card"><span>Tracked wallets</span><strong id="statWallets">—</strong><small>smart-money targets</small></article>
+          <article class="stat-card"><span>Open automation</span><strong id="statOrders">—</strong><small id="statSnipers">—</small></article>
+        </div>
+
+        <div class="two-col">
+          <article class="panel">
+            <div class="panel-head">
+              <div><span class="eyebrow">DISCOVERY RADAR</span><h3>Hot Solana tokens</h3></div>
+              <button class="text-btn" data-jump="discover">View all</button>
+            </div>
+            <div id="dashboardDiscovery" class="table-wrap skeleton-box"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div><span class="eyebrow">SMART MONEY</span><h3>Tracked wallets</h3></div>
+              <button class="text-btn" data-jump="copy">Manage</button>
+            </div>
+            <div id="dashboardLeaders" class="stack-list"></div>
+          </article>
+        </div>
+
+        <div class="two-col">
+          <article class="panel">
+            <div class="panel-head"><div><span class="eyebrow">POSITIONS</span><h3>Paper portfolio</h3></div><button class="text-btn" data-jump="positions">Open</button></div>
+            <div id="dashboardPositions" class="stack-list"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><span class="eyebrow">SIGNALS</span><h3>Recent wallet confluence</h3></div></div>
+            <div id="dashboardSignals" class="stack-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-discover" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow">GMGN-STYLE MARKET SCANNER</span><h2>Discover</h2><p>Rank recent Solana activity, inspect risk signals, then route a token straight into the trade panel.</p></div>
+          <button id="discoverRefresh" class="btn ghost">Refresh radar</button>
+        </div>
+        <div class="filter-strip">
+          <input id="discoverFilter" placeholder="Filter symbol / mint" />
+          <select id="discoverSort">
+            <option value="volume">Sort: 1h volume</option>
+            <option value="liquidity">Sort: liquidity</option>
+            <option value="mcap">Sort: market cap</option>
+            <option value="change">Sort: 1h change</option>
+          </select>
+        </div>
+        <article class="panel flush">
+          <div id="discoverTable" class="table-wrap"></div>
+        </article>
+      </section>
+
+      <section id="view-trade" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow">TROJAN-STYLE EXECUTION</span><h2>Trade</h2><p>Market buy/sell, limits, DCA and automatic exits without leaving the token page.</p></div>
+        </div>
+        <div class="trade-layout">
+          <article class="panel chart-panel">
+            <div class="token-search-row">
+              <input id="tradeMint" placeholder="Paste Solana token CA" />
+              <button id="loadTokenBtn" class="btn primary">Load token</button>
+            </div>
+            <div id="tokenHero" class="token-hero empty-state">Load a token to see price, liquidity, market cap and security signals.</div>
+            <div class="chart-shell">
+              <iframe id="dexFrame" title="DexScreener chart" loading="lazy"></iframe>
+              <div id="chartPlaceholder" class="chart-placeholder">DEX chart will appear here</div>
+            </div>
+          </article>
+
+          <article class="panel trade-panel">
+            <div class="panel-head">
+              <div><span class="eyebrow">EXECUTION</span><h3 id="tradeSideTitle">Buy</h3></div>
+              <div id="tradeSideSwitch" class="segmented">
+                <button data-side="buy" class="active">Buy</button>
+                <button data-side="sell">Sell</button>
+              </div>
+            </div>
+
+            <div id="tradeTypeSwitch" class="segmented three">
+              <button data-type="market" class="active">Market</button>
+              <button data-type="limit">Limit</button>
+              <button data-type="dca">DCA</button>
+            </div>
+
+            <div id="marketFields" class="trade-fields">
+              <label id="marketAmountLabel">Buy amount (SOL)</label>
+              <input id="marketAmount" type="number" min="0" step="0.001" value="0.03" />
+              <div id="quickBuy" class="quick-grid">
+                <button data-value="0.01">0.01</button><button data-value="0.03">0.03</button><button data-value="0.05">0.05</button><button data-value="0.10">0.10</button>
+              </div>
+              <div id="quickSell" class="quick-grid hidden">
+                <button data-value="25">25%</button><button data-value="50">50%</button><button data-value="75">75%</button><button data-value="100">100%</button>
+              </div>
+            </div>
+
+            <div id="limitFields" class="trade-fields hidden">
+              <div class="form-grid">
+                <label>Trigger type<select id="limitTargetType"><option value="price">Price USD</option><option value="mcap">Market cap USD</option></select></label>
+                <label>Direction<select id="limitDirection"><option value="below">At / below</option><option value="above">At / above</option></select></label>
+              </div>
+              <label>Target<input id="limitTarget" type="number" min="0" step="any" placeholder="0.0000123" /></label>
+              <label id="limitSizeLabel">Buy amount (SOL)<input id="limitSize" type="number" min="0" step="0.001" value="0.03" /></label>
+            </div>
+
+            <div id="dcaFields" class="trade-fields hidden">
+              <label id="dcaSizeLabel">Amount per run (SOL)<input id="dcaSize" type="number" min="0" step="0.001" value="0.03" /></label>
+              <div class="form-grid">
+                <label>Interval (sec)<input id="dcaInterval" type="number" min="10" value="60" /></label>
+                <label>Runs<input id="dcaRuns" type="number" min="1" max="100" value="5" /></label>
+              </div>
+            </div>
+
+            <div class="risk-box">
+              <div><span>Mode</span><b id="tradeModeLabel">PAPER</b></div>
+              <div><span>Live execution</span><b id="liveFlag">—</b></div>
+            </div>
+
+            <button id="executeTradeBtn" class="btn primary wide tall">Execute paper buy</button>
+
+            <div class="divider"></div>
+            <div class="panel-head compact-head"><div><span class="eyebrow">AUTO SELL</span><h3>Exit profile</h3></div></div>
+            <div class="form-grid three-col">
+              <label>Take profit %<input id="tpPct" type="number" min="0" value="25" /></label>
+              <label>Stop loss %<input id="slPct" type="number" min="0" value="15" /></label>
+              <label>Trailing %<input id="trailPct" type="number" min="0" value="0" /></label>
+            </div>
+            <button id="createExitBtn" class="btn ghost wide">Create exit orders</button>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-copy" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow">SMART-MONEY AUTOMATION</span><h2>Copy Trade</h2><p>Track wallets first, then promote only vetted wallets into copy mode with your own sizing and exit rules.</p></div>
+          <button id="addLeaderBtn" class="btn primary">+ Add wallet</button>
+        </div>
+        <article class="panel flush"><div id="leadersTable" class="table-wrap"></div></article>
+
+        <div id="leaderEditor" class="drawer hidden">
+          <div class="drawer-card">
+            <div class="panel-head"><div><span class="eyebrow">COPY SETTINGS</span><h3 id="leaderEditorTitle">Add wallet</h3></div><button id="closeLeaderEditor" class="icon-btn">×</button></div>
+            <form id="leaderForm" class="form-stack">
+              <input id="leaderOriginalWallet" type="hidden" />
+              <label>Wallet address<input id="leaderWallet" required placeholder="Solana wallet" /></label>
+              <label>Label<input id="leaderLabel" placeholder="e.g. High Conviction" /></label>
+              <div class="form-grid">
+                <label>Mode<select id="leaderMode"><option value="track">Track only</option><option value="paper">Paper copy</option></select></label>
+                <label>Tier<select id="leaderTier"><option>A</option><option selected>B</option><option>C</option></select></label>
+              </div>
+              <div class="form-grid">
+                <label>Fixed buy SOL<input id="leaderFixed" type="number" min="0" step="0.001" value="0.03" /></label>
+                <label>Copy buy %<input id="leaderPercent" type="number" min="0" step="1" value="0" /></label>
+              </div>
+              <div class="form-grid">
+                <label>Min liquidity USD<input id="leaderMinLiq" type="number" min="0" value="25000" /></label>
+                <label>Max market cap USD<input id="leaderMaxMcap" type="number" min="0" value="0" /></label>
+              </div>
+              <div class="form-grid three-col">
+                <label>TP %<input id="leaderTp" type="number" min="0" value="0" /></label>
+                <label>SL %<input id="leaderSl" type="number" min="0" value="0" /></label>
+                <label>Trail %<input id="leaderTrail" type="number" min="0" value="0" /></label>
+              </div>
+              <div class="toggle-row"><label><input id="leaderCopySells" type="checkbox" checked /> Copy sells</label><label><input id="leaderDuplicates" type="checkbox" /> Duplicate buys</label></div>
+              <button class="btn primary wide" type="submit">Save wallet</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-wallet" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow">WALLET FORENSICS</span><h2>Wallet Intel</h2><p>Score copyability, estimate realized performance and inspect observed trading behaviour before you follow a wallet.</p></div>
+        </div>
+        <form id="walletAnalyzeForm" class="search-card">
+          <input id="walletAnalyzeInput" placeholder="Paste Solana wallet address" />
+          <button class="btn primary" type="submit">Analyze</button>
+        </form>
+        <div id="walletResults" class="wallet-results empty-state">No wallet analyzed yet.</div>
+      </section>
+
+      <section id="view-positions" class="view">
+        <div class="section-head">
+          <div><span class="eyebrow">PORTFOLIO</span><h2>Positions</h2><p>Paper positions are valued with current token and SOL prices from the execution backend.</p></div>
+          <button id="paperResetBtn" class="btn ghost">Reset paper account</button>
+        </div>
+        <div class="stats-grid compact-stats">
+          <article class="stat-card"><span>Cash</span><strong id="posCash">—</strong></article>
+          <article class="stat-card"><span>Positions</span><strong id="posValue">—</strong></article>
+          <article class="stat-card"><span>Realized PnL</span><strong id="posRealized">—</strong></article>
+          <article class="stat-card"><span>Unrealized PnL</span><strong id="posUnrealized">—</strong></article>
+        </div>
+        <article class="panel flush"><div id="positionsTable" class="table-wrap"></div></article>
+      </section>
+
+      <section id="view-orders" class="view">
+        <div class="section-head"><div><span class="eyebrow">AUTOMATION</span><h2>Orders</h2><p>Limit, DCA, take-profit, stop-loss and trailing-stop orders created by the strategy engine.</p></div></div>
+        <article class="panel flush"><div id="ordersTable" class="table-wrap"></div></article>
+      </section>
+
+      <section id="view-sniper" class="view">
+        <div class="section-head"><div><span class="eyebrow">LAUNCH SCANNER</span><h2>Sniper</h2><p>Your current backend sniper watches newly seen launch profiles and applies liquidity / market-cap filters.</p></div><button id="addSniperBtn" class="btn primary">+ New setup</button></div>
+        <div class="two-col">
+          <article class="panel"><div class="panel-head"><div><span class="eyebrow">SETUPS</span><h3>Auto sniper</h3></div></div><div id="sniperList" class="stack-list"></div></article>
+          <article class="panel">
+            <div class="panel-head"><div><span class="eyebrow">NEW SETUP</span><h3>Parameters</h3></div></div>
+            <form id="sniperForm" class="form-stack">
+              <label>Label<input id="sniperLabel" value="New Launches" /></label>
+              <div class="form-grid">
+                <label>Buy SOL<input id="sniperSol" type="number" min="0" step="0.001" value="0.03" /></label>
+                <label>Max snipes<input id="sniperMax" type="number" min="1" max="100" value="3" /></label>
+              </div>
+              <div class="form-grid">
+                <label>Min liquidity USD<input id="sniperMinLiq" type="number" min="0" value="25000" /></label>
+                <label>Max market cap USD<input id="sniperMaxMcap" type="number" min="0" value="500000" /></label>
+              </div>
+              <button class="btn primary wide" type="submit">Create paper sniper</button>
+            </form>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-history" class="view">
+        <div class="section-head"><div><span class="eyebrow">AUDIT TRAIL</span><h2>History</h2><p>Recent paper and live execution history from the shared state store.</p></div></div>
+        <article class="panel flush"><div id="historyTable" class="table-wrap"></div></article>
+      </section>
+    </main>
+  </div>
+
+  <div id="toastHost" class="toast-host"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
