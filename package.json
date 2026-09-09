@@ -1,14 +1,15 @@
 {
   "name": "solana-copy-discord-bot",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {
-    "start": "npm run deploy-commands && node src/index.js",
+    "start": "node src/web-entry.js",
+    "start:discord": "npm run deploy-commands && node src/index.js",
     "deploy-commands": "node src/deploy-commands.js",
     "test": "node --test tests/*.test.js",
-    "check": "node --check src/index.js && node --check src/commands.js && node --check src/v5-commands.js && node --check src/v5-discord.js && node --check src/monitor.js && node --check src/realtime.js && node --check src/alpha.js && node --check src/smart-wallet.js && node --check src/strategy.js && node --check src/market.js && node --check src/wallet-performance.js && node --check src/analytics.js && node --check src/paper.js && node --check src/jupiter.js && node --check src/helius.js && node --check src/solana.js && node --check src/state.js && node --check src/swap.js && npm test && node -e \"Promise.all([import('./src/commands.js'), import('./src/v5-commands.js')]).then(([a,b]) => { const rows=[...a.commands,...b.v5Commands]; const names=new Set(rows.map(x=>x.name)); if (!rows.length || names.size!==rows.length) process.exit(1); console.log('Validated', rows.length, 'Discord commands'); })\""
+    "check": "node --check src/web-entry.js && node --check src/web.js && node --check public/app.js && node --check src/index.js && node --check src/commands.js && node --check src/v5-commands.js && node --check src/v5-discord.js && node --check src/monitor.js && node --check src/realtime.js && node --check src/alpha.js && node --check src/smart-wallet.js && node --check src/strategy.js && node --check src/market.js && node --check src/wallet-performance.js && node --check src/analytics.js && node --check src/paper.js && node --check src/jupiter.js && node --check src/helius.js && node --check src/solana.js && node --check src/state.js && node --check src/swap.js && npm test"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
